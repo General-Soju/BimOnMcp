@@ -74,6 +74,37 @@ restart Claude Desktop / Code.
 | AutoCAD bundle | `%AppData%\Autodesk\ApplicationPlugins\BimOnAcadPlugin.bundle\` |
 | Claude config | Desktop `claude_desktop_config.json` + Code `~\.claude.json` (merged, existing settings preserved) |
 
+## Manual MCP registration (if it didn't auto-register)
+
+If Claude doesn't show the `BimOn-*` tools after installing and restarting, register them by hand.
+
+**Config file(s)** — edit the one for the client you use (create it if missing; keep existing content):
+- Claude Desktop: `%AppData%\Claude\claude_desktop_config.json`
+- Claude Code: `%UserProfile%\.claude.json`
+
+Add (or merge) these `mcpServers` entries — use **double backslashes** and replace `<you>` with your Windows username:
+```json
+{
+  "mcpServers": {
+    "BimOn-Revit":      { "command": "C:\\Users\\<you>\\AppData\\Roaming\\BimOnAI\\BimOnMcpBridge.exe", "args": ["--target","revit"] },
+    "BimOn-Navisworks": { "command": "C:\\Users\\<you>\\AppData\\Roaming\\BimOnAI\\BimOnMcpBridge.exe", "args": ["--target","navisworks"] },
+    "BimOn-AutoCAD":    { "command": "C:\\Users\\<you>\\AppData\\Roaming\\BimOnAI\\BimOnMcpBridge.exe", "args": ["--target","autocad"] }
+  }
+}
+```
+Then **fully quit and restart** Claude Desktop / Claude Code.
+
+Or just re-run the bundled merge script (preserves your other settings, writes both clients):
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:AppData\BimOnAI\MergeClaudeConfig.ps1" -BridgePath "$env:AppData\BimOnAI\BimOnMcpBridge.exe"
+```
+
+**Common causes of "not registered":**
+- Installed **while Claude was open** → just restart Claude.
+- Installer run **as administrator** → the config/bridge went to the *admin* account's `%AppData%`; reinstall as a **normal user**, or point the `command` path at the correct `%AppData%`.
+- **Claude Desktop rewrites its config on exit** → edit the file only while Claude is **fully closed**, then reopen.
+- Confirm the bridge exists: `%AppData%\BimOnAI\BimOnMcpBridge.exe`.
+
 ## Build from source
 
 ```bash
