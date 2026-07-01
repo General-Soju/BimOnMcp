@@ -6,7 +6,7 @@ description: BimOn Dynamo MCP(dynamo_* 도구)로 Revit 안에서 실행 중인 
 # Dynamo MCP 사용 스킬 (BimOn-Revit)
 
 실행 중인 **Dynamo for Revit** 세션을 `dynamo_*` MCP 도구로 제어한다. 목표: **속도**(배치)와 **정확성**(올바른 노드/포트/코드).
-근거: github.com/DynamoDS 소스 조사 + 라이브 검증(Revit 2025 / Dynamo 3.2.1). 상세는 BimOnMcpSuite/DYNAMO_MCP_RESEARCH.md.
+근거: github.com/DynamoDS 소스 조사 + 라이브 검증(Revit 2025 / Dynamo 3.2.1).
 
 ## 0. 전제 (먼저 확인)
 - Dynamo가 **Revit 안에서 실행 + 편집기 열림**, 그래프(HomeWorkspace) 1개 열림.
