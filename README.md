@@ -59,8 +59,12 @@ edit (`add_node`/`add_code_block`/`add_python_node`/`connect`/`delete_node`), an
 
 ## Install
 
-Download **`Installer/Output/BimOnMcp_Setup_v1.0.0.exe`** and run it **as a normal user** (not administrator).
-See **[INSTALL_GUIDE.md](INSTALL_GUIDE.md)** for details. After install, restart Claude Desktop / Code.
+Download the installer from the **[latest release](https://github.com/General-Soju/BimOnMcp/releases/latest)** and run it
+**as a normal user** (not administrator). See **[INSTALL_GUIDE.md](INSTALL_GUIDE.md)** for details. After install,
+restart Claude Desktop / Code.
+
+> The installer is not code-signed → Windows SmartScreen may warn "Windows protected your PC"; click **More info → Run anyway**.
+> Verify integrity with the SHA-256 on the release page.
 
 | Component | Location |
 |----------|-----------|
