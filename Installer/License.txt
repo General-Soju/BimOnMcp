@@ -1,10 +1,10 @@
-﻿BimOn AI MCP Suite
-Revit · Navisworks · AutoCAD · Forma
+BimOn MCP
+Revit · Navisworks · AutoCAD · Dynamo
 
 제작자(Author): JungGeun Park (소주장군 / General Soju)
 YouTube: https://www.youtube.com/@GeneralSoju
 Email: sojunbeer119@gmail.com
-GitHub: https://github.com/General-Soju/BimOnMcpSuite
+GitHub: https://github.com/General-Soju/BimOnMcp
 
 이 소프트웨어는 아래 MIT 라이선스로 배포됩니다.
 계속하려면 라이선스 조건에 동의해야 합니다.

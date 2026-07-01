@@ -99,7 +99,6 @@ namespace BimOnMcpBridge
             Console.OutputEncoding = Encoding.UTF8;
             Console.InputEncoding  = Encoding.UTF8;
 
-            // Forma는 데스크톱 파이프가 아니라 브라우저 확장과 로컬 WebSocket으로 통신한다.
             {
                 Log($"BimOnMcpBridge starting — target: {_target} / pipe: {PipeName}");
             }
@@ -491,12 +490,6 @@ namespace BimOnMcpBridge
             return list.ToArray();
         }
 
-        // ── Autodesk Forma — Site Design 전용 도구 ─────────────────────────
-        //   대상: Autodesk Forma 의 "Site Design"(개념설계/대지계획) 환경.
-        //   forma-embedded-view-sdk v0.93 직매핑 — 다른 Autodesk 제품/모듈이 아님.
-        //   Forma 디자인 캔버스의 분석 패널 확장(브라우저 JS SDK)으로 동작 →
-        //   공통 스크립트 도구 대신 SDK 직매핑 도구 노출. 복합 인자는 JSON 문자열.
-        //   WRITE 도구는 Forma.getCanEdit()==true(편집 권한)일 때만 동작(check_can_edit 선행).
 
         // ── 헬퍼 ────────────────────────────────────────────────────────
         private static object Tool(string name, string desc) => new

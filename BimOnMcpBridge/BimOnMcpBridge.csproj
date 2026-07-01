@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -10,14 +10,10 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!-- BimOn 브랜드 아이콘 (Explorer / 작업 관리자에서 exe 아이콘) -->
+    <!-- BimOn 釉뚮옖???꾩씠肄?(Explorer / ?묒뾽 愿由ъ옄?먯꽌 exe ?꾩씠肄? -->
     <ApplicationIcon>..\Installer\BimOn.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
-  <!-- 공개 빌드: -p:PublicBuild=true → PUBLIC 심볼 정의 → Forma(#if !PUBLIC) 전부 제외 -->
-  <PropertyGroup Condition="'$(PublicBuild)'=='true'">
-    <DefineConstants>$(DefineConstants);PUBLIC</DefineConstants>
-  </PropertyGroup>
 </Project>

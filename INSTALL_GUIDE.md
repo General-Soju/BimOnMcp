@@ -27,7 +27,7 @@ it auto-connects.
 ## Dynamo (Revit)
 Open **Dynamo for Revit** with a graph, then Claude can read/build/run it via the `dynamo_*` tools
 (status, get_graph, get_node_values, set_input, run_current, add_node/code_block/python_node, connect,
-delete_node, build_graph). The included `skills/dynamo-mcp` skill guides optimal usage.
+delete_node, search_nodes, build_graph — 12 tools). The included `skills/dynamo-mcp` skill guides optimal usage.
 
 ## Manual config (if needed)
 If auto-registration didn’t run, add to `%AppData%\Claude\claude_desktop_config.json` (Desktop) and/or

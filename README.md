@@ -51,15 +51,16 @@ Multiple instances of the same product are supported — each registers a unique
 
 | Host | Dedicated | Common script tools | Dynamo (Revit only) |
 |--------|:--:|:--:|:--:|
-| Revit | 23 | 6 | **11** |
+| Revit | 23 | 6 | **12** |
 | Navisworks | 11 | 6 | — |
 | AutoCAD | 13 | 6 | — |
 
 **Common 6**: `execute_script` · `save_script` · `execute_saved_script` · `list_scripts` · `list_scripts_search` · `delete_script`
 
-**Dynamo 11**: read (`dynamo_status`/`get_graph`/`get_node_values`), control (`set_input`/`run_current`),
-edit (`add_node`/`add_code_block`/`add_python_node`/`connect`/`delete_node`), and **`dynamo_build_graph`**
-(batch-build many nodes+connections in one call). A `dynamo-mcp` Claude skill is included (`skills/dynamo-mcp`).
+**Dynamo 12**: read (`dynamo_status`/`get_graph`/`get_node_values`), control (`set_input`/`run_current`),
+edit (`add_node`/`add_code_block`/`add_python_node`/`connect`/`delete_node`), **`dynamo_search_nodes`**
+(find exact OOTB node creation names), and **`dynamo_build_graph`** (batch-build many nodes+connections in one call).
+A `dynamo-mcp` Claude skill is included (`skills/dynamo-mcp`).
 
 ## Install
 
