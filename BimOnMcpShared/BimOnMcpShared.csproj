@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0-windows;net48</TargetFrameworks>
+    <AssemblyName>BimOnMcpShared</AssemblyName>
+    <RootNamespace>BimOnMcpShared</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWPF>true</UseWPF>
+    <!-- net48 에서는 C# 10 이상 + Nullable 사용 가능하도록 언어 버전 고정 -->
+    <LangVersion>10</LangVersion>
+  </PropertyGroup>
+  <!-- IronPython 3.4 는 .NET 6+ 전용 -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net48'">
+    <PackageReference Include="IronPython"        Version="3.4.2" />
+    <PackageReference Include="IronPython.StdLib" Version="3.4.2" />
+  </ItemGroup>
+  <!-- IronPython 2.7 은 .NET Framework 4.8 호환 -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="IronPython" Version="2.7.12" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>

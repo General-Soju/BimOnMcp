@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>BimOn MCP — Revit</Name>
+    <Assembly>BimOnRevitPlugin.dll</Assembly>
+    <FullClassName>BimOnRevitPlugin.RevitApp</FullClassName>
+    <ClientId>B1C20001-F5A6-7890-BCDE-F12345678901</ClientId>
+    <VendorId>BIMON</VendorId>
+    <VendorDescription>BimOn MCP Suite — Revit Plugin | JungGeun Park (소주장군), https://www.youtube.com/@GeneralSoju, sojunbeer119@gmail.com</VendorDescription>
+  </AddIn>
+</RevitAddIns>

@@ -1,0 +1,69 @@
+# Build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# NuGet packages
+packages/
+*.nupkg
+*.nuget.props
+*.nuget.targets
+
+# Visual Studio files
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Local user config (not for sharing)
+*.local
+
+# Output DLLs (deploy from build, not source)
+# (빌드 결과물은 각 플러그인 폴더의 bin/Release에 있음)
+
+# Revit / Navisworks / AutoCAD SDK (로컬 참조 - 공유 불필요)
+# RevitAPI.dll, NavisworksAPI.dll 등은 SDK 설치경로에서 참조
+
+# IronPython 런타임 (NuGet으로 복원 가능)
+# ironpython*.dll
+
+# 테스트/임시 스크립트
+*.tmp
+*.bak
+
+# 로컬 Claude MCP 설정 (개인 경로/키 포함)
+claude_desktop_config.json
+
+# 설치 파일 빌드 결과물
+Installer/Output/
+Installer/BridgeOutput/
+Installer/IconCandidates/
+
+# 수동 업로드 시 생성된 중복 폴더
+BimOnMcpSuite/
+
+# Forma 확장 — 별도 레포로 분리 관리 (이 Suite 레포에서는 추적 안 함)
+BimOnFormaExtension/
+
+# GitHub 업로드 헬퍼 스크립트
+push_to_github.ps1
+GitHub_Upload.bat

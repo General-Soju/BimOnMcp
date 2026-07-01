@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" ProductType="Application"
+    Name="BimOn MCP AutoCAD" Description="BimOn MCP Suite — AutoCAD Plugin"
+    Author="JungGeun Park (소주장군)" CompanyDetails="JungGeun Park (소주장군)" Version="3.0.0.0"
+    AutodeskAlias="BIMON_ACAD" AppVersion="3.0.0.0">
+  <CompanyDetails Name="JungGeun Park (소주장군)"
+                  Url="https://www.youtube.com/@GeneralSoju"
+                  Email="sojunbeer119@gmail.com"/>
+  <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R28.0"/>
+  <Components Description="BimOn MCP AutoCAD Plugin">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R25.0" SeriesMax="R28.0"/>
+    <ComponentEntry AppName="BimOnAcadPlugin" ModuleName="./Contents/BimOnAcadPlugin.dll"
+        AppDescription="BimOn MCP AutoCAD" LoadOnCommandInvocation="False" LoadOnAutoCADStartup="True"/>
+  </Components>
+</ApplicationPackage>

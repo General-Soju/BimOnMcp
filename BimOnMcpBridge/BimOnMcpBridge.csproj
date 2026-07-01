@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>BimOnMcpBridge</AssemblyName>
+    <RootNamespace>BimOnMcpBridge</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- BimOn 브랜드 아이콘 (Explorer / 작업 관리자에서 exe 아이콘) -->
+    <ApplicationIcon>..\Installer\BimOn.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <!-- 공개 빌드: -p:PublicBuild=true → PUBLIC 심볼 정의 → Forma(#if !PUBLIC) 전부 제외 -->
+  <PropertyGroup Condition="'$(PublicBuild)'=='true'">
+    <DefineConstants>$(DefineConstants);PUBLIC</DefineConstants>
+  </PropertyGroup>
+</Project>

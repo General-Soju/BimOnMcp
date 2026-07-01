@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>BimOnNavisPlugin</AssemblyName>
+    <RootNamespace>BimOnNavisPlugin</RootNamespace>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWPF>true</UseWPF>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BimOnMcpShared\BimOnMcpShared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <!-- net48 에서 dynamic 키워드 사용 시 필요 -->
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+  <!-- Navisworks API는 메이저 버전 간 비호환 (2025=v22, 2026=v23) → 버전별 빌드 필수.
+       기본 2025. 다른 버전: dotnet build -p:NavisVersion=2026 -->
+  <PropertyGroup>
+    <NavisVersion Condition="'$(NavisVersion)'==''">2025</NavisVersion>
+    <NavisApiDir Condition="Exists('C:\Program Files\Autodesk\Navisworks Manage $(NavisVersion)\Autodesk.Navisworks.Api.dll')">C:\Program Files\Autodesk\Navisworks Manage $(NavisVersion)</NavisApiDir>
+    <NavisApiDir Condition="'$(NavisApiDir)'=='' AND Exists('D:\Program Files\Autodesk\Navisworks Manage $(NavisVersion)\Autodesk.Navisworks.Api.dll')">D:\Program Files\Autodesk\Navisworks Manage $(NavisVersion)</NavisApiDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Autodesk.Navisworks.Api">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Api.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Autodesk.Navisworks.Clash">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Clash.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="BimOnNavis.manifest">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <!-- IronPython 2.7 호환 표준 라이브러리 (os, collections 등) -> 출력 lib 폴더 -->
+  <ItemGroup>
+    <Content Include="lib27\*.py">
+      <Link>lib\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

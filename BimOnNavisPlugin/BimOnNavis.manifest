@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Exchange>
+  <Application id="BimOnNavisPlugin" displayname="BimOn MCP — Navisworks"
+               description="BimOn MCP Suite — Navisworks Plugin | JungGeun Park (소주장군), https://www.youtube.com/@GeneralSoju"
+               version="3.0.0.0" publisher="JungGeun Park (소주장군)"
+               entry="BimOnNavisPlugin.NavisApp, BimOnNavisPlugin"
+               iconfile="" licensetype="Free"/>
+</Exchange>
