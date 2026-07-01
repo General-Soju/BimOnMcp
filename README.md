@@ -6,8 +6,12 @@ BimOn MCP is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) 
 drive your desktop Autodesk BIM hosts: query models, run IronPython scripts, save reusable scripts to an in-host
 palette, and read/build/run **Dynamo** graphs — all in natural language.
 
-> Author: **JungGeun Park (General Soju)** · [YouTube @GeneralSoju](https://www.youtube.com/@GeneralSoju)
+> Author: **JungGeun Park (General Soju)** · [YouTube @GeneralSoju](https://www.youtube.com/@GeneralSoju) · sojunbeer119@gmail.com
 > MIT License · Community edition (Revit / Navisworks / AutoCAD / Dynamo).
+
+**Source & downloads:** [github.com/General-Soju/BimOnMcp](https://github.com/General-Soju/BimOnMcp) — or scan:
+
+<img src="docs/bimonmcp-qr.png" alt="BimOnMcp repository QR code" width="150" />
 
 ---
 
@@ -131,3 +135,5 @@ ISCC.exe Installer/BimOnMcp.iss
 ## License
 
 **MIT** — Copyright (c) 2026 **JungGeun Park (General Soju)**. See [LICENSE](LICENSE).
+
+**Contact:** sojunbeer119@gmail.com · [YouTube @GeneralSoju](https://www.youtube.com/@GeneralSoju)

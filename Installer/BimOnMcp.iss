@@ -9,6 +9,7 @@
 #define MyAppPublisher "JungGeun Park (General Soju)"
 #define MyAppURL       "https://www.youtube.com/@GeneralSoju"
 #define MyAppSupport   "https://github.com/General-Soju/BimOnMcp"
+#define MyAppEmail     "sojunbeer119@gmail.com"
 
 ; 소스 경로는 .iss(Installer\) 기준 상대경로 — 저장소를 클론한 누구나 빌드 가능
 #define SrcRevit   "..\BimOnRevitPlugin\bin\Release\net8.0-windows"
@@ -29,6 +30,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppSupport}
+AppContact={#MyAppEmail}
 AppCopyright=Copyright (C) 2026 JungGeun Park (General Soju). MIT License.
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName}
@@ -167,7 +169,8 @@ begin
     Msg := Msg + '(Dynamo tools are part of the Revit plugin.)' + #13#10 + #13#10;
     Msg := Msg + 'Author : JungGeun Park (General Soju)' + #13#10;
     Msg := Msg + 'GitHub : https://github.com/General-Soju/BimOnMcp' + #13#10;
-    Msg := Msg + 'YouTube: https://www.youtube.com/@GeneralSoju';
+    Msg := Msg + 'YouTube: https://www.youtube.com/@GeneralSoju' + #13#10;
+    Msg := Msg + 'Email  : sojunbeer119@gmail.com';
     MsgBox(Msg, mbInformation, MB_OK);
   end;
 end;
