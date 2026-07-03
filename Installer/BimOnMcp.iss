@@ -16,6 +16,8 @@
 #define SrcNavis   "..\BimOnNavisPlugin\bin\Release\net48"
 #define SrcNavis26 "..\BimOnNavisPlugin\bin\Release\net48-2026"
 #define SrcNavis27 "..\BimOnNavisPlugin\bin\Release\net48-2027"
+; Navisworks 2027(Nw24)은 Plugins\ 폴더를 지원하지 않음 → ApplicationPlugins 번들의 PackageContents.xml
+#define SrcNavisPC27 "..\BimOnNavisPlugin\PackageContents2027.xml"
 #define SrcAcad    "..\BimOnAcadPlugin\bin\Release\net8.0-windows"
 #define SrcBridge  "BridgeOutput"
 
@@ -23,6 +25,8 @@
 [InstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\Autodesk\ApplicationPlugins\BimOnAcadPlugin.bundle"; Components: autocad
 Type: filesandordirs; Name: "{commonpf}\Autodesk\ApplicationPlugins\BimOnAcadPlugin.bundle"; Components: autocad
+; 옛 Plugins\ 폴더 방식(Navisworks 2027/Nw24는 미지원 — 번들 방식으로 교체) 잔재 정리
+Type: filesandordirs; Name: "{commonappdata}\Autodesk\Navisworks Manage 2027\Plugins\BimOnNavisPlugin"; Components: navis
 
 [Setup]
 AppName={#MyAppName}
@@ -94,7 +98,9 @@ Source: "{#SrcRevit}\*.dll";                            DestDir: "{userappdata}\
 ; ============================================================
 Source: "{#SrcNavis}\*";   DestDir: "{commonappdata}\Autodesk\Navisworks Manage 2025\Plugins\BimOnNavisPlugin"; Components: navis; Check: IsNavis2025; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SrcNavis26}\*"; DestDir: "{commonappdata}\Autodesk\Navisworks Manage 2026\Plugins\BimOnNavisPlugin"; Components: navis; Check: IsNavis2026; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#SrcNavis27}\*"; DestDir: "{commonappdata}\Autodesk\Navisworks Manage 2027\Plugins\BimOnNavisPlugin"; Components: navis; Check: IsNavis2027; Flags: ignoreversion recursesubdirs createallsubdirs
+; 2027(Nw24)은 Plugins\ 폴더 스캔 미지원 — ApplicationPlugins 번들 방식 (실사용자 라이브 검증됨)
+Source: "{#SrcNavisPC27}"; DestDir: "{commonappdata}\Autodesk\ApplicationPlugins\BimOnNavisPlugin.bundle"; DestName: "PackageContents.xml"; Components: navis; Check: IsNavis2027; Flags: ignoreversion
+Source: "{#SrcNavis27}\*"; DestDir: "{commonappdata}\Autodesk\ApplicationPlugins\BimOnNavisPlugin.bundle\Contents\v24"; Components: navis; Check: IsNavis2027; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ============================================================
 ;  AutoCAD — ApplicationPlugins bundle (R25-R28, version-independent)
@@ -189,8 +195,13 @@ end;
   조용히 빠지는 경우를 설치 완료 메시지에서 바로 알 수 있게 한다. }
 function NavisPluginFileOK(const Year: String): Boolean;
 begin
-  Result := FileExists(ExpandConstant(
-    '{commonappdata}\Autodesk\Navisworks Manage ' + Year + '\Plugins\BimOnNavisPlugin\BimOnNavisPlugin.dll'));
+  { 2027(Nw24)은 ApplicationPlugins 번들 경로, 2025/2026은 기존 Plugins\ 경로 }
+  if Year = '2027' then
+    Result := FileExists(ExpandConstant(
+      '{commonappdata}\Autodesk\ApplicationPlugins\BimOnNavisPlugin.bundle\Contents\v24\BimOnNavisPlugin.dll'))
+  else
+    Result := FileExists(ExpandConstant(
+      '{commonappdata}\Autodesk\Navisworks Manage ' + Year + '\Plugins\BimOnNavisPlugin\BimOnNavisPlugin.dll'));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
