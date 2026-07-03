@@ -184,18 +184,41 @@ begin
   Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+{ Navisworks 플러그인 DLL이 실제로 ProgramData에 안착했는지 검증.
+  Check() 통과(=버전 감지)와 실제 파일 복사 성공은 별개 — ACL 거부 등으로
+  조용히 빠지는 경우를 설치 완료 메시지에서 바로 알 수 있게 한다. }
+function NavisPluginFileOK(const Year: String): Boolean;
+begin
+  Result := FileExists(ExpandConstant(
+    '{commonappdata}\Autodesk\Navisworks Manage ' + Year + '\Plugins\BimOnNavisPlugin\BimOnNavisPlugin.dll'));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
-var MetaFile, Msg: String;
+var MetaFile, Msg, NavisFailed: String;
 begin
   if CurStep = ssPostInstall then
   begin
     MetaFile := ExpandConstant('{userappdata}\BimOnAI\scripts_meta.json');
     if not FileExists(MetaFile) then SaveStringToFile(MetaFile, '[]', False);
     ConfigureClaude();
+
+    NavisFailed := '';
+    if WizardIsComponentSelected('navis') then begin
+      if IsNavis2025() and not NavisPluginFileOK('2025') then NavisFailed := NavisFailed + ' 2025';
+      if IsNavis2026() and not NavisPluginFileOK('2026') then NavisFailed := NavisFailed + ' 2026';
+      if IsNavis2027() and not NavisPluginFileOK('2027') then NavisFailed := NavisFailed + ' 2027';
+    end;
+
     Msg := 'Installation complete!' + #13#10 + #13#10;
     Msg := Msg + 'Restart Claude Desktop / Claude Code to activate BimOn MCP.' + #13#10 + #13#10;
     Msg := Msg + 'Registered MCP servers: BimOn-Revit, BimOn-Navisworks, BimOn-AutoCAD' + #13#10;
     Msg := Msg + '(Dynamo tools are part of the Revit plugin.)' + #13#10 + #13#10;
+    if NavisFailed <> '' then begin
+      Msg := Msg + '⚠ Navisworks plugin file copy FAILED for:' + NavisFailed + #13#10;
+      Msg := Msg + '  Likely a permission issue writing to ProgramData. Try re-running' + #13#10;
+      Msg := Msg + '  this installer as Administrator, or check write access to:' + #13#10;
+      Msg := Msg + '  %ProgramData%\Autodesk\Navisworks Manage <year>\Plugins\' + #13#10 + #13#10;
+    end;
     Msg := Msg + 'Author : JungGeun Park (General Soju)' + #13#10;
     Msg := Msg + 'GitHub : https://github.com/General-Soju/BimOnMcp' + #13#10;
     Msg := Msg + 'YouTube: https://www.youtube.com/@GeneralSoju' + #13#10;
