@@ -124,12 +124,41 @@ begin
   Result := RegKeyExists(HKLM, 'SOFTWARE\Autodesk\Revit\Autodesk Revit 2027') or
             RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Autodesk\Revit\Autodesk Revit 2027');
 end;
+{ 폴더 존재만으로 판단하면 특정 환경에서 폴더가 아직 없어 컴포넌트가 조용히 스킵될 수 있음 →
+  Uninstall 레지스트리(DisplayName 정확 일치, 언어팩 제외)를 폴백으로 추가 }
+function NavisUninstallKeyExists(const DisplayNameExact: String): Boolean;
+var
+  Roots: array[0..1] of String;
+  R: Integer;
+  Names: TArrayOfString;
+  I: Integer;
+  Found: String;
+begin
+  Result := False;
+  Roots[0] := 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall';
+  Roots[1] := 'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall';
+  for R := 0 to 1 do
+  begin
+    if RegGetSubkeyNames(HKLM, Roots[R], Names) then
+    begin
+      for I := 0 to GetArrayLength(Names) - 1 do
+      begin
+        if RegQueryStringValue(HKLM, Roots[R] + '\' + Names[I], 'DisplayName', Found) then
+          if Found = DisplayNameExact then begin Result := True; Exit; end;
+      end;
+    end;
+  end;
+end;
+
 function IsNavis2025(): Boolean;
-begin Result := DirExists(ExpandConstant('{commonappdata}\Autodesk\Navisworks Manage 2025')); end;
+begin Result := DirExists(ExpandConstant('{commonappdata}\Autodesk\Navisworks Manage 2025'))
+             or NavisUninstallKeyExists('Autodesk Navisworks Manage 2025'); end;
 function IsNavis2026(): Boolean;
-begin Result := DirExists(ExpandConstant('{commonappdata}\Autodesk\Navisworks Manage 2026')); end;
+begin Result := DirExists(ExpandConstant('{commonappdata}\Autodesk\Navisworks Manage 2026'))
+             or NavisUninstallKeyExists('Autodesk Navisworks Manage 2026'); end;
 function IsNavis2027(): Boolean;
-begin Result := DirExists(ExpandConstant('{commonappdata}\Autodesk\Navisworks Manage 2027')); end;
+begin Result := DirExists(ExpandConstant('{commonappdata}\Autodesk\Navisworks Manage 2027'))
+             or NavisUninstallKeyExists('Autodesk Navisworks Manage 2027'); end;
 
 function InitializeSetup(): Boolean;
 var Msg: String; ResultCode: Integer;
