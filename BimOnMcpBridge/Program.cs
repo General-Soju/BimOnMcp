@@ -239,10 +239,22 @@ namespace BimOnMcpBridge
         };
 
         // ── 공통 스크립트 도구 (3개 모두 동일) ──────────────────────────
+        // host별로 execute_script가 실제 주입하는 전역 변수가 다르므로, 도구 설명에 정확히 명시한다.
+        // (미기재 시 AI가 __revit__ 등 다른 제품/도구의 관례를 추측해 시행착오가 반복되는 문제가 있었음.)
+        private static string PreInjectedVars(string host) => host switch
+        {
+            "Revit"      => "doc (Document), uidoc (UIDocument), app (Application), " +
+                             "__revit__ (UIApplication — pyRevit-style alias, same object as app's owner)",
+            "Navisworks" => "doc (Document), app (same as doc — Navisworks has no separate Application handle here)",
+            "AutoCAD"    => "doc (Document), db (Database), ed (Editor), app (DocumentManager)",
+            _            => "doc"
+        };
+
         private static object[] CommonScriptTools(string host) => new object[]
         {
             ToolP("execute_script",
                 $"Executes IronPython code in the {host} API context. " +
+                $"Pre-injected variables (already in scope, do not reassign from globals): {PreInjectedVars(host)}. " +
                 "Use result = '...' at the end to return a value. " +
                 "Read-only queries run without a transaction. " +
                 "Create/modify operations are automatically wrapped in a transaction " +

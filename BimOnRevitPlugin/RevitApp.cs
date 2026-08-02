@@ -269,9 +269,12 @@ namespace BimOnRevitPlugin
                 if (doc == null) return "No document open";
                 var vars = new Dictionary<string, object?>
                 {
-                    ["doc"]   = doc,
-                    ["uidoc"] = new UIDocument(doc),
-                    ["app"]   = doc.Application
+                    ["doc"]      = doc,
+                    ["uidoc"]    = new UIDocument(doc),
+                    ["app"]      = doc.Application,
+                    // pyRevit/RevitPythonShell 관례 별칭 — AI가 흔히 __revit__.ActiveUIDocument.Document로
+                    // 접근을 시도하므로, 문서화와 별개로 실제 UIApplication을 그대로 노출해 바로 동작하게 한다.
+                    ["__revit__"] = _uiApp
                 };
 
                 if (!userHasTx && !doc.IsReadOnly)
@@ -675,7 +678,7 @@ namespace BimOnRevitPlugin
                 string code = ScriptStorageService.ExtractUserCode(raw);
                 var doc     = _uiApp.ActiveUIDocument?.Document;
                 if (doc == null) { MessageBox.Show("No document is currently open."); return; }
-                var vars = new Dictionary<string, object?> { ["doc"]=doc, ["uidoc"]=new UIDocument(doc), ["app"]=doc.Application };
+                var vars = new Dictionary<string, object?> { ["doc"]=doc, ["uidoc"]=new UIDocument(doc), ["app"]=doc.Application, ["__revit__"]=_uiApp };
                 bool needPreamble = !code.Contains("clr.AddReference");
                 var result = ScriptExecutor.Execute(code, vars, preamble: needPreamble ? RevitPreamble : null);
                 MessageBox.Show(ScriptExecutor.FormatResult(result), $"[{meta.Name}] 결과",
