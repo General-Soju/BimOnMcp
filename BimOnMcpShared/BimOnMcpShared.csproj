@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <Version>1.1.0</Version>
     <TargetFrameworks>net8.0-windows;net48</TargetFrameworks>
     <AssemblyName>BimOnMcpShared</AssemblyName>
     <RootNamespace>BimOnMcpShared</RootNamespace>

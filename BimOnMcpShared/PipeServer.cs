@@ -17,25 +17,35 @@ namespace BimOnMcpShared
     {
         private readonly string _pipeName;
         private readonly Func<JObject, CancellationToken, Task<string>> _handleRequest;
+        private readonly int _concurrency;
 
         private static readonly Encoding Utf8NoBom =
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
         public PipeServer(
             string pipeName,
-            Func<JObject, CancellationToken, Task<string>> handleRequest)
+            Func<JObject, CancellationToken, Task<string>> handleRequest, int concurrency = 1)
         {
             _pipeName      = pipeName;
             _handleRequest = handleRequest;
+            if (concurrency < 1 || concurrency > 16) throw new ArgumentOutOfRangeException(nameof(concurrency));
+            _concurrency = concurrency;
         }
 
         public async Task RunAsync(CancellationToken ct)
+        {
+            var workers = new Task[_concurrency];
+            for (int i = 0; i < workers.Length; i++) workers[i] = ListenAsync(ct);
+            await Task.WhenAll(workers);
+        }
+
+        private async Task ListenAsync(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
                 var pipe = new NamedPipeServerStream(
                     _pipeName, PipeDirection.InOut,
-                    1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    _concurrency, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
                 try
                 {
                     Log($"[{_pipeName}] 대기 중...");
@@ -43,7 +53,7 @@ namespace BimOnMcpShared
                     Log($"[{_pipeName}] 연결됨");
                     await HandleAsync(pipe, ct);
                 }
-                catch (OperationCanceledException) { break; }
+                catch (OperationCanceledException) { if (ct.IsCancellationRequested) break; }
                 catch (Exception ex) { Log($"[{_pipeName}] 오류: {ex.Message}"); }
                 finally { try { pipe.Dispose(); } catch { } }
             }
@@ -58,10 +68,13 @@ namespace BimOnMcpShared
             string? line;
             try
             {
+                using var readLimit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                if (_concurrency > 1) readLimit.CancelAfter(5000);
+                using var closeOnCancel = readLimit.Token.Register(() => { try { pipe.Dispose(); } catch { } });
 #if NET48
                 line = await reader.ReadLineAsync();
 #else
-                line = await reader.ReadLineAsync(ct);
+                line = await reader.ReadLineAsync(readLimit.Token);
 #endif
             }
             catch (OperationCanceledException) { throw; }
@@ -77,6 +90,9 @@ namespace BimOnMcpShared
 
             try
             {
+                using var writeLimit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                if (_concurrency > 1) writeLimit.CancelAfter(5000);
+                using var closeOnCancel = writeLimit.Token.Register(() => { try { pipe.Dispose(); } catch { } });
                 await writer.WriteLineAsync(
                     JsonConvert.SerializeObject(new { result }));
 #if NET48
@@ -84,7 +100,7 @@ namespace BimOnMcpShared
 #else
                 await writer.FlushAsync(ct);
 #endif
-                pipe.WaitForPipeDrain();
+                if (_concurrency == 1) pipe.WaitForPipeDrain();
             }
             catch (Exception ex) { Log($"전송 오류: {ex.Message}"); }
         }

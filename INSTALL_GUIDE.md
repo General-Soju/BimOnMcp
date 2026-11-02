@@ -7,7 +7,7 @@
 
 ## Install (recommended — installer)
 1. **Close** Revit, Navisworks, AutoCAD **and** Claude Desktop / Claude Code.
-2. Run **`BimOnMcp_Setup_v1.0.0.exe`** as a **normal user** (NOT “Run as administrator”).
+2. Run **`BimOnMcp_Setup_v1.1.0.exe`** as a **normal user** (NOT “Run as administrator”).
    - Running elevated installs into the wrong account’s `%AppData%` and the MCP won’t be found.
 3. Accept the MIT license, pick components (Revit / Navisworks / AutoCAD), install.
 4. The installer merges MCP servers into your Claude config(s), preserving existing settings.

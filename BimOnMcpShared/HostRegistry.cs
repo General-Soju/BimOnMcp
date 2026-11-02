@@ -42,6 +42,7 @@ namespace BimOnMcpShared
         private readonly string       _product;     // revit / navisworks / autocad
         private readonly string       _pipeName;    // 고유: base.<pid>
         private readonly int          _pid;
+        private readonly long         _startUtcTicks;
         private readonly string       _pname;       // 프로세스명(PID 재사용 방지)
         private readonly Func<string> _title;       // 현재 문서 제목 제공자(지연 평가)
         private readonly string       _dir;
@@ -59,6 +60,7 @@ namespace BimOnMcpShared
             _product = product;
             var p     = Process.GetCurrentProcess();
             _pid      = p.Id;
+            _startUtcTicks = p.StartTime.ToUniversalTime().Ticks;
             _pname    = SafeName(p);
             _pipeName = $"{baseName}.{_pid}";
             _title    = title ?? (() => product);
@@ -159,6 +161,7 @@ namespace BimOnMcpShared
                 ["product"] = _product,
                 ["title"] = SafeTitle(),
                 ["since"] = DateTime.UtcNow.Ticks,
+                ["startUtcTicks"] = _startUtcTicks,
             };
             WriteAtomic(_activeFile, o.ToString(Newtonsoft.Json.Formatting.None));
         }
@@ -188,8 +191,11 @@ namespace BimOnMcpShared
                 ["pipe"]  = _pipeName,
                 ["pname"] = _pname,
                 ["product"] = _product,
+                ["jobProtocol"] = 1,
+                ["controlPipe"] = _pipeName + ".control",
                 ["title"] = SafeTitle(),
                 ["ts"]    = DateTime.UtcNow.Ticks,
+                ["startUtcTicks"] = _startUtcTicks,
             };
             WriteAtomic(_selfFile, o.ToString(Newtonsoft.Json.Formatting.None));
         }
@@ -223,13 +229,14 @@ namespace BimOnMcpShared
 
         private static bool IsAlive(JObject j)
         {
-            int pid = (int?)j["pid"] ?? 0;
+            if (!int.TryParse(j["pid"]?.ToString(), out int pid)) return false;
             if (pid <= 0) return false;
             string pname = j["pname"]?.ToString() ?? "";
             try
             {
-                var p = Process.GetProcessById(pid);
+                using var p = Process.GetProcessById(pid);
                 if (p == null || p.HasExited) return false;
+                if ((long?)j["startUtcTicks"] is long started && p.StartTime.ToUniversalTime().Ticks != started) return false;
                 return string.IsNullOrEmpty(pname)
                     || string.Equals(p.ProcessName, pname, StringComparison.OrdinalIgnoreCase);
             }

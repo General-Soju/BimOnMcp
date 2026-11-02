@@ -6,7 +6,7 @@ description: BimOn Dynamo MCP(dynamo_* 도구)로 Revit 안에서 실행 중인 
 # Dynamo MCP 사용 스킬 (BimOn-Revit)
 
 실행 중인 **Dynamo for Revit** 세션을 `dynamo_*` MCP 도구로 제어한다. 목표: **속도**(배치)와 **정확성**(올바른 노드/포트/코드).
-근거: github.com/DynamoDS 소스 조사 + 라이브 검증(Revit 2025 / Dynamo 3.2.1).
+근거: DynamoDS 소스 및 설치된 API 조사. 실제 버전별 검증 결과는 배포 검증 보고서를 확인한다.
 
 ## 0. 전제 (먼저 확인)
 - Dynamo가 **Revit 안에서 실행 + 편집기 열림**, 그래프(HomeWorkspace) 1개 열림.
@@ -15,15 +15,15 @@ description: BimOn Dynamo MCP(dynamo_* 도구)로 Revit 안에서 실행 중인 
 
 ## 1. 표준 워크플로 (항상 이 순서)
 1. `dynamo_status` — Dynamo/버전/그래프 확인
-2. `dynamo_get_graph` — **기존 노드 이름** 파악(연결 대상). 노드는 이름으로 참조하므로 필수.
+2. `list_instances` / `list_documents`로 instanceId·documentId·workspaceId·graphRevision 확인. `dynamo_get_graph`로 GUID와 이름을 읽는다. 동명 노드는 GUID로 지정한다.
 3. 계획: 각 작업에 OOTB / CodeBlock / Python 중 무엇이 최적인지 결정(§3)
 4. **`dynamo_build_graph`** — 노드+연결을 **한 번에** 생성(§2)
-5. `dynamo_get_node_values` — 결과·상태 확인
+5. JobId가 반환되면 `get_job`으로 terminal까지 확인한 후 `dynamo_get_node_values`와 그래프 상태를 별도로 검증한다. 완료는 저장 완료를 뜻하지 않는다.
 6. 수정: `dynamo_set_input`(입력값) / 재빌드 / `dynamo_delete_node`
 
 ## 2. 속도 규칙 — 무조건 배치
 - **노드를 2개 이상 만들거나 연결이 있으면 반드시 `dynamo_build_graph` 한 번**으로. 개별 `add_*`/`connect` 반복은 소규모 수정·디버깅에만.
-- 이유: 호출마다 (모델 추론 + ExternalEvent + **Automatic 전체 재평가**)가 반복됨. build_graph는 빌드 중 **자동평가를 끄고**(RunType=Manual) 끝에 1회만 실행 → 수~수십 배 빠름.
+- 편집과 Run은 **Manual 모드만 허용**한다. Automatic/Periodic는 MANUAL_MODE_REQUIRED로 거절한다. 배치로 호출 횟수를 줄이고 run=true일 때 평가 완료를 추적한다. 배치는 원자적 트랜잭션이 아니므로 실패하면 그래프를 읽고 부분 변경을 확인한 뒤 복구한다.
 - spec 형식:
 ```jsonc
 { "nodes":[ {"id":"a","node":"Revit.Elements.Element.ElementType","x":0,"y":0},
@@ -36,7 +36,7 @@ description: BimOn Dynamo MCP(dynamo_* 도구)로 Revit 안에서 실행 중인 
   "run":true }
 ```
 - 노드 종류 키는 **하나만**: `node`(OOTB 생성이름) / `codeblock`(DesignScript) / `python`(코드) / `string`(값).
-- `from`/`to`는 **이 spec의 id 또는 기존 노드 이름**.
+- `from`/`to`는 **이 spec의 id 또는 기존 노드 GUID/유일한 이름**.
 
 ## 3. 노드 타입 선택 (혼합이 정답)
 | 작업 | 선택 | 이유 |
@@ -79,14 +79,15 @@ description: BimOn Dynamo MCP(dynamo_* 도구)로 Revit 안에서 실행 중인 
 - 인스턴스 vs 타입 파라미터 구분(대부분의 "Width/면적/높이" 류는 타입).
 
 ## 9. 값 읽기·실행 함정
-- `run_current`는 **비동기**(RunCancelCommand) → 직후 `dynamo_get_node_values`로 재확인.
+- `run_current`는 **비동기**. `get_job` terminal 확인 후 값 읽기. 응답 유실 시 동일 idempotencyKey와 인자로 조회하고 새 키로 쓰기를 반복하지 않는다. unknown이면 결과를 먼저 조사한다.
 - 값 표시: 컬렉션 = `list[N] first=…`. **중첩 리스트는 `first=null`로 보일 수 있음**(표시 한계지 데이터 오류 아님).
 - `null (not evaluated)` → 미평가/에러. 노드 **State** 확인: Active(정상)·Warning(에러)·**Dead**(입력 없음/생성이름 미해결).
 
 ## 10. 버전 메모
-- 라이브 검증: **Dynamo 3.2.1 / Revit 2025**. Suite 범위 = Revit 2025/2026/2027 = Dynamo **3.x**(2027은 4.x 추정).
-- Python 엔진 API만 버전 간 다름(2.7–2.12 enum / 3.0+ string) — 도구가 내부적으로 흡수함. **명령·포트·RunType·모델 접근은 전 버전 동일**.
-- 미확정: Revit 2026/2027의 정확한 Dynamo 버전·CodeBlock ctor·엔진 기본값(해당 버전 라이브 검증 필요).
+- 설치 호스트의 실제 Dynamo 버전을 get_environment로 확인한다. 지원 연도만으로 엔진/API를 추측하지 않는다.
+- Python 엔진은 호스트 기본값 상속을 우선하고, 필요한 경우 설치된 엔진만 선택한다.
+- get_node_values는 캐시값이다. MCP 평가와 그래프 리비전이 일치해도 외부 문서 변경의 최신성은 보장하지 않는다.
+- 단위는 노드/API마다 확인한다. Revit 내부 길이는 ft이며 WallType.Width 시험값도 내부 길이와 비교한다. 무조건 mm로 간주하지 않는다.
 
 ## 11. 흔한 실패 → 회피
 - 생성이름 오타 → **Dead** 노드(get_graph로 검증) · 포트 인덱스 오류 · 현지화 파라미터명 · **동명 노드 연결 모호**(예 "Code Block" 2개면 이름으로 못 가림 → 하나만 두거나 OOTB/Python로) · build_graph 미사용 시 느림.

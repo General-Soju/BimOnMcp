@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -27,8 +27,11 @@ namespace BimOnMcpBridge
     ///   }
     /// }
     /// </summary>
-    class Program
+    partial class Program
     {
+        private static readonly object OutputGate = new object();
+        private static readonly SemaphoreSlim RevitCalls = new SemaphoreSlim(16, 16);
+        private static readonly SemaphoreSlim ControlCalls = new SemaphoreSlim(4, 4);
         private const int PIPE_TIMEOUT_MS    = 28_000;   // Must be < REVIT_TIMEOUT_MS
         private const int REVIT_TIMEOUT_MS   = 30_000;
 
@@ -71,13 +74,14 @@ namespace BimOnMcpBridge
 
         private static bool IsHostAlive(JObject j)
         {
-            int pid = (int?)j["pid"] ?? 0;
+            if (!int.TryParse(j["pid"]?.ToString(), out int pid)) return false;
             if (pid <= 0) return false;
             string pname = j["pname"]?.ToString() ?? "";
             try
             {
-                var p = Process.GetProcessById(pid);
+                using var p = Process.GetProcessById(pid);
                 if (p == null || p.HasExited) return false;
+                if ((long?)j["startUtcTicks"] is long started && p.StartTime.ToUniversalTime().Ticks != started) return false;
                 return string.IsNullOrEmpty(pname)
                     || string.Equals(p.ProcessName, pname, StringComparison.OrdinalIgnoreCase);
             }
@@ -92,6 +96,7 @@ namespace BimOnMcpBridge
 
         static async Task Main(string[] args)
         {
+            var outstanding = new List<Task>();
             // --target 파싱
             for (int i = 0; i < args.Length - 1; i++)
                 if (args[i] == "--target") _target = args[i + 1].ToLower();
@@ -142,7 +147,19 @@ namespace BimOnMcpBridge
                             break;
 
                         case "tools/call":
-                            if (id != null) await HandleToolCall(id, request);
+                            if (id != null)
+                            {
+                                if (_target == "revit" || _target == "autocad" || _target == "navisworks")
+                                {
+                                    outstanding.RemoveAll(t => t.IsCompleted);
+                                    string callName = request["params"]?["name"]?.ToString() ?? "";
+                                    var lane = callName == "get_job" || callName == "cancel_job" || callName == "get_environment" || callName == "list_documents" || callName == "list_instances"
+                                        ? ControlCalls : RevitCalls;
+                                    if (!lane.Wait(0)) SendToolError(id, "BRIDGE_BUSY: Too many concurrent requests in this lane. No work was submitted.");
+                                    else outstanding.Add(HandleRevitSafely(id, request, lane));
+                                }
+                                else await HandleToolCall(id, request);
+                            }
                             break;
 
                         default:
@@ -152,6 +169,7 @@ namespace BimOnMcpBridge
                 }
                 catch (Exception ex) { Log($"Processing error: {ex.Message}"); }
             }
+            await Task.WhenAll(outstanding);
         }
 
         private static async Task HandleToolCall(JToken id, JObject request)
@@ -215,7 +233,7 @@ namespace BimOnMcpBridge
         private static void Send(object obj)
         {
             string json = JsonConvert.SerializeObject(obj);
-            Console.WriteLine(json);
+            lock (OutputGate) Console.WriteLine(json);
         }
         private static void SendError(JToken? id, int code, string msg) =>
             Send(new { jsonrpc = "2.0", id, error = new { code, message = msg } });
@@ -229,12 +247,12 @@ namespace BimOnMcpBridge
     }
 
     // ── 도구 정의 ─────────────────────────────────────────────────────────
-    internal static class ToolDefinitions
+    internal static partial class ToolDefinitions
     {
         public static object[] Get(string target) => target.ToLower() switch
         {
-            "navisworks" => Navisworks(),
-            "autocad"    => AutoCAD(),
+            "navisworks" => WithRevitJobs(new List<object>(Navisworks()), "Navisworks"),
+            "autocad"    => WithRevitJobs(new List<object>(AutoCAD()), "AutoCAD"),
             _            => Revit(),
         };
 
@@ -371,14 +389,14 @@ namespace BimOnMcpBridge
                     new[] { ("filter","string","Node-name substring filter (optional)") },
                     Array.Empty<string>()),
                 ToolP("dynamo_set_input",
-                    "[Dynamo] Sets an input node's value by node name (slider Value / number / string / " +
+                    "[Dynamo] Sets an input node's value by GUID or unique node name (slider Value / number / string / " +
                     "CodeBlock Code / dropdown SelectedString·SelectedIndex). Then call dynamo_run_current " +
-                    "or rely on Automatic mode, and re-read with dynamo_get_node_values.",
+                    "in Manual mode, wait for the job to finish, and re-read with dynamo_get_node_values.",
                     new[] { ("nodeName","string","Target node name"), ("value","string","New value (string; auto-converted)") },
                     new[] { "nodeName", "value" }),
                 Tool("dynamo_run_current",
                     "[Dynamo] Triggers evaluation of the open graph (like clicking Run). Asynchronous — " +
-                    "then call dynamo_get_node_values to read the refreshed results."),
+                    "Manual mode is required. Poll get_job until terminal, then read dynamo_get_node_values."),
 
                 // ── Dynamo 그래프 편집 (노드 추가/연결/삭제) ──
                 // 노드 타입 선택 원칙(최적 그래프는 셋을 혼합):
@@ -433,7 +451,7 @@ namespace BimOnMcpBridge
                     new[] { "query" }),
             };
             list.AddRange(CommonScriptTools("Revit"));
-            return list.ToArray();
+            return WithRevitJobs(list);
         }
 
         // ── Navisworks 도구 ──────────────────────────────────────────────
@@ -446,12 +464,12 @@ namespace BimOnMcpBridge
                 Tool("get_model_count",       "Returns the number of loaded models."),
                 Tool("get_clash_tests",       "Returns the list of Clash Detective tests."),
                 ToolP("get_clash_results",
-                    "Returns clash items for a specific clash test.",
-                    new[] { ("testName","string","Clash test name"), ("statusFilter","string","Status filter (All/New/Active/Reviewed/Approved/Resolved)"), ("maxCount","integer","Maximum count") },
+                    "Returns clash items and GUIDs for a test selected by GUID or unique name.",
+                    new[] { ("testName","string","Clash test GUID or unique name"), ("statusFilter","string","Status filter (All/New/Active/Reviewed/Approved/Resolved)"), ("maxCount","integer","Maximum count") },
                     new[] { "testName" }),
                 ToolP("approve_clash",
                     "Approves, resolves, or reviews a clash item.",
-                    new[] { ("testName","string","Test name"), ("clashName","string","Clash item name"), ("status","string","Status to set (Approved/Resolved/Reviewed)") },
+                    new[] { ("testName","string","Test GUID or unique name"), ("clashName","string","Clash result GUID or unique name"), ("status","string","Status to set (Approved/Resolved/Reviewed)") },
                     new[] { "testName", "clashName", "status" }),
                 Tool("get_selection_sets",    "Returns the list of selection sets."),
                 Tool("get_viewpoints",        "Returns the list of saved viewpoints."),

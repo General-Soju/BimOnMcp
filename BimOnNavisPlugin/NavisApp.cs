@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -22,76 +22,37 @@ namespace BimOnNavisPlugin
         DisplayName = "BimOn MCP",
         ToolTip = "BimOn MCP Suite — Navisworks Plugin")]
     [AddInPlugin(AddInLocation.AddIn)]
-    public class NavisApp : AddInPlugin
+    public partial class NavisApp : AddInPlugin
     {
         private const string PIPE_NAME = "BimOnNavisPipe";
         private const string HOST      = "Navisworks";
 
-        private static ScriptStorageService      _storage    = new ScriptStorageService();
+        private static ScriptStorageService      _storage    = null!;
         private static CancellationTokenSource?  _cts;
         private static ScriptPaletteContent?     _palette;
         private static NavisScriptWindow?        _scriptWin;
         // 창의 STA 스레드 Dispatcher — 메인 스레드에서 안전하게 접근 가능한 유일한 방법
         private static System.Windows.Threading.Dispatcher? _scriptWinDispatcher;
 
-        // ── DLL 로드 시 자동 시작 (Navisworks 시작과 동시에 실행) ──────────
-        // 주의: 플러그인 스캐너가 어트리뷰트만 읽어도 ModuleInitializer가 실행된다.
-        // 본문이 외부 어셈블리 타입을 직접 참조하면 "JIT 시점"에 FileNotFoundException이
-        // 발생할 수 있고, 이는 메서드 내부 try-catch로 잡히지 않아 호스트가 통째로
-        // 크래시한다(Navisworks 2027 설치폴더 Plugins 로드에서 실제 발생).
-        // → 외부 타입 참조를 NoInlining 별도 메서드로 분리하고, 의존성 resolve 훅을 먼저 등록.
-        [System.Runtime.CompilerServices.ModuleInitializer]
-        internal static void AutoStart()
-        {
-            try
-            {
-                // 플러그인 폴더에서 의존 어셈블리 resolve (mscorlib 타입만 사용 — JIT 안전)
-                AppDomain.CurrentDomain.AssemblyResolve += ResolvePluginAssembly;
-                AutoStartCore();
-            }
-            catch { /* JIT/타입로드 예외 포함 — 호스트 프로세스 보호 */ }
-        }
-
-        private static System.Reflection.Assembly? ResolvePluginAssembly(
-            object? sender, ResolveEventArgs args)
-        {
-            try
-            {
-                string name = new System.Reflection.AssemblyName(args.Name).Name + ".dll";
-                string dir  = System.IO.Path.GetDirectoryName(
-                    System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
-                string path = System.IO.Path.Combine(dir, name);
-                return System.IO.File.Exists(path)
-                    ? System.Reflection.Assembly.LoadFrom(path) : null;
-            }
-            catch { return null; }
-        }
-
+        // BimOnStartup (EventWatcherPlugin) starts the host service on load.
+        // AssemblyBootstrap only installs dependency resolution; it does not call host APIs.
         [System.Runtime.CompilerServices.MethodImpl(
             System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-        private static void AutoStartCore()
+        internal static void EnsureStarted()
         {
+            if (_cts != null && !_cts.IsCancellationRequested) return;
+            AssemblyBootstrap.Log("EnsureStarted");
             _storage = new ScriptStorageService();
             _cts     = new CancellationTokenSource();
-            string pipeName = HostRegistry.Init("navisworks", PIPE_NAME,
-                () => { try { return NavisApplication.ActiveDocument?.Title ?? "Navisworks"; }
-                        catch { return "Navisworks"; } });
-            Task.Run(() => new PipeServer(pipeName, HandleRequest).RunAsync(_cts.Token));
+            StartJobs();
         }
 
         // ── Add-ins 버튼 클릭 → 스크립트 팔레트 창 열기 ─────────────────
-        // 자동 시작(ModuleInitializer)으로 서버는 이미 실행 중.
+        // EventWatcherPlugin starts the server independently of this button.
         // 버튼 역할: ① 스크립트 팔레트 창 열기  ② 서버 비정상 종료 시 재시작
         public override int Execute(string[] parameters)
         {
-            bool running = _cts != null && !_cts.IsCancellationRequested;
-            if (!running)
-            {
-                _storage = new ScriptStorageService();
-                _cts     = new CancellationTokenSource();
-                string pipeName = HostRegistry.Current?.PipeName ?? PIPE_NAME;
-                Task.Run(() => new PipeServer(pipeName, HandleRequest).RunAsync(_cts.Token));
-            }
+            EnsureStarted();
             ShowScriptPalette();
             return 0;
         }
@@ -149,7 +110,7 @@ namespace BimOnNavisPlugin
         }
 
         // ── 요청 라우팅 ───────────────────────────────────────────────
-        private static async Task<string> HandleRequest(JObject req, CancellationToken ct)
+        private static string Dispatch(JObject req, CancellationToken ct)
         {
             var tool = req["params"]?["name"]?.ToString();
             var args = req["params"]?["arguments"] as JObject;
@@ -162,9 +123,7 @@ namespace BimOnNavisPlugin
                 "get_model_count"      => doc == null ? "No document open" : $"Loaded models: {doc.Models.Count}",
                 "get_clash_tests"      => GetClashTests(doc),
                 "get_clash_results"    => GetClashResults(doc, args),
-                // approve_clash: Navisworks API is tolerant for background-thread writes
-                // (unlike Revit). The WPF STA thread is NOT the Navisworks main thread,
-                // so dispatching to _scriptWinDispatcher would be incorrect here.
+                // All API access runs in the Navisworks host Idle callback.
                 "approve_clash"        => ApproveClash(doc, args),
                 "get_selection_sets"   => GetSelectionSets(doc),
                 "get_viewpoints"       => GetViewpoints(doc),
@@ -175,7 +134,7 @@ namespace BimOnNavisPlugin
                 "execute_script"       => HandleExecuteScript(args, doc),
                 "list_scripts"         => HandleListScripts(null),
                 "list_scripts_search"  => HandleListScripts(args?["keyword"]?.ToString()),
-                "save_script"          => await HandleSaveScript(args, doc),
+                "save_script"          => HandleSaveScript(args, doc),
                 "execute_saved_script" => HandleExecuteSavedScript(args, doc),
                 "delete_script"        => HandleDeleteScript(args),
 
@@ -189,100 +148,6 @@ namespace BimOnNavisPlugin
         {
             if (doc == null) return "No document open";
             return $"제목: {doc.Title}\n경로: {(string.IsNullOrEmpty(doc.FileName) ? "(unsaved)" : doc.FileName)}\n모델 수: {doc.Models.Count}\n단위: {doc.Units}";
-        }
-
-        private static string GetClashTests(Document? doc)
-        {
-            if (doc == null) return "No document open";
-            dynamic clash = DocumentExtensions.GetClash(doc);
-            if (clash == null) return "Clash Detective not found.";
-            var sb = new StringBuilder("Clash tests:\n");
-            try
-            {
-                dynamic testsData = clash.TestsData;
-                foreach (dynamic test in testsData.Tests)
-                    sb.AppendLine($"  • {test.DisplayName}");
-            }
-            catch (Exception ex)
-            {
-                sb.AppendLine($"  [오류] {ex.Message}");
-            }
-            return sb.ToString().TrimEnd();
-        }
-
-        private static string GetClashResults(Document? doc, JObject? args)
-        {
-            if (doc == null) return "No document open";
-            string testName    = args?["testName"]?.ToString() ?? "";
-            string statusFilter= args?["statusFilter"]?.ToString() ?? "All";
-            int max            = int.TryParse(args?["maxCount"]?.ToString(), out int mc) ? mc : 100;
-
-            dynamic clash = DocumentExtensions.GetClash(doc);
-            if (clash == null) return "Clash Detective not found.";
-            var sb = new StringBuilder($"[{testName}] Clash items:\n");
-            try
-            {
-                dynamic testsData = clash.TestsData;
-                dynamic? targetTest = null;
-                foreach (dynamic test in testsData.Tests)
-                {
-                    if (((string)test.DisplayName).Equals(testName, StringComparison.OrdinalIgnoreCase))
-                    { targetTest = test; break; }
-                }
-                if (targetTest == null) return $"'{testName}' 테스트를 찾을 수 없습니다.";
-
-                int count = 0;
-                foreach (dynamic item in targetTest.Children)
-                {
-                    if (count >= max) break;
-                    var itemStatus = (string)item.Status.ToString();
-                    if (!statusFilter.Equals("All", StringComparison.OrdinalIgnoreCase)
-                        && !itemStatus.Equals(statusFilter, StringComparison.OrdinalIgnoreCase)) continue;
-                    sb.AppendLine($"  • {item.DisplayName}  상태:{itemStatus}  거리:{item.Distance:F3}");
-                    count++;
-                }
-                if (count == 0) sb.AppendLine("  조건에 맞는 item not found");
-            }
-            catch (Exception ex)
-            {
-                sb.AppendLine($"  [오류] {ex.Message}");
-            }
-            return sb.ToString().TrimEnd();
-        }
-
-        private static string ApproveClash(Document? doc, JObject? args)
-        {
-            if (doc == null) return "No document open";
-            string testName  = args?["testName"]?.ToString() ?? "";
-            string clashName = args?["clashName"]?.ToString() ?? "";
-            string statusStr = args?["status"]?.ToString() ?? "Approved";
-
-            dynamic clash = DocumentExtensions.GetClash(doc);
-            if (clash == null) return "Clash Detective not found.";
-            if (!Enum.TryParse<ClashResultStatus>(statusStr, true, out var newStatus))
-                return $"Invalid status: {statusStr}";
-
-            try
-            {
-                dynamic testsData = clash.TestsData;
-                foreach (dynamic test in testsData.Tests)
-                {
-                    if (!((string)test.DisplayName).Equals(testName, StringComparison.OrdinalIgnoreCase)) continue;
-                    foreach (IClashResult result in test.Children)
-                    {
-                        if (result.DisplayName.Equals(clashName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            testsData.TestsEditResultStatus(result, newStatus);
-                            return $"'{clashName}' → {newStatus} processed";
-                        }
-                    }
-                }
-                return $"'{clashName}' item not found";
-            }
-            catch (Exception ex)
-            {
-                return $"[Error] {ex.Message}";
-            }
         }
 
         private static string GetSelectionSets(Document? doc)
@@ -499,7 +364,7 @@ namespace BimOnNavisPlugin
             return sb.ToString().TrimEnd();
         }
 
-        private static async Task<string> HandleSaveScript(JObject? args, Document? doc)
+        private static string HandleSaveScript(JObject? args, Document? doc)
         {
             string name        = args?["name"]?.ToString() ?? "";
             string description = args?["description"]?.ToString() ?? "";
@@ -558,20 +423,13 @@ namespace BimOnNavisPlugin
 
         internal static void SetPalette(ScriptPaletteContent p) => _palette = p;
         internal static (ScriptStorageService storage, string host, Action<ScriptMeta> exec) GetPaletteArgs() =>
-            (_storage, HOST, meta =>
+            (_storage, HOST, async meta =>
             {
-                var doc = NavisApplication.ActiveDocument;
-                if (doc == null) { MessageBox.Show("No document is currently open."); return; }
                 string raw  = File.ReadAllText(meta.ScriptPath);
                 string code = ScriptStorageService.ExtractUserCode(raw);
-                var vars    = new Dictionary<string, object?> { ["doc"] = doc, ["app"] = doc };
-                // preamble 분리 실행 (IronPython 2.7 import * 버그 우회)
-                bool needPreamble = !code.Contains("clr.AddReference");
-                var result = ScriptExecutor.Execute(code, vars,
-                    preamble: needPreamble ? NavisPreamble : null);
-                MessageBox.Show(ScriptExecutor.FormatResult(result), $"[{meta.Name}] 결과",
-                    MessageBoxButton.OK,
-                    result.Success ? MessageBoxImage.Information : MessageBoxImage.Error);
+                var result = await _jobs!.Handle(new JObject { ["params"] = new JObject {
+                    ["name"] = "execute_script", ["arguments"] = new JObject { ["code"] = code } } }, _cts!.Token);
+                MessageBox.Show(result, $"[{meta.Name}] 결과");
             });
     }
 }

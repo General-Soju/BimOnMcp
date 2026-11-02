@@ -51,6 +51,8 @@ namespace BimOnMcpShared
         private Button?                         _connBtn;
         private Border?                         _connDot;
         private bool                            _connSubscribed;
+        private TextBlock? _jobStatus;
+        private Button? _cancelJob;
 
         private IConnectionController? Ctrl => _conn ?? HostRegistry.Current;
 
@@ -98,6 +100,17 @@ namespace BimOnMcpShared
             //    컨트롤러는 지연 해석(Ctrl). 팔레트가 레지스트리 초기화보다 먼저
             //    생성/복원돼도 아래 2초 타이머가 상태를 채운다.
             header.Children.Add(BuildConnectionBar());
+            var jobPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            _jobStatus = new TextBlock { Text = "No MCP jobs in this session", TextWrapping = TextWrapping.Wrap, Foreground = TxtMuted, FontSize = 11 };
+            jobPanel.Children.Add(_jobStatus);
+            var jobButtons = new StackPanel { Orientation = Orientation.Horizontal };
+            var copyJob = new Button { Content = "Copy job ID", Margin = new Thickness(0, 4, 6, 0) };
+            copyJob.Click += (_, _) => { var job = JobMonitor.Latest; if (job != null) { try { Clipboard.SetText(job.JobId); } catch { } } };
+            _cancelJob = new Button { Content = "Cancel / request stop", IsEnabled = false, Margin = new Thickness(0, 4, 0, 0),
+                ToolTip = "Queued jobs are cancelled. Running API/Python work cannot be forcibly stopped." };
+            _cancelJob.Click += (_, _) => { JobMonitor.CancelLatest(); UpdateJobUI(); };
+            jobButtons.Children.Add(copyJob); jobButtons.Children.Add(_cancelJob); jobPanel.Children.Add(jobButtons);
+            header.Children.Add(jobPanel);
 
             // 탭 버튼
             var tabPanel = new StackPanel
@@ -180,7 +193,7 @@ namespace BimOnMcpShared
             // 연결 상태 초기화 + 주기 갱신(다른 인스턴스 변화·지연 초기화 반영)
             UpdateConnUI();
             var connTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            connTimer.Tick += (_, _) => UpdateConnUI();
+            connTimer.Tick += (_, _) => { UpdateConnUI(); UpdateJobUI(); };
             connTimer.Start();
             Unloaded += (_, _) =>
             {
@@ -190,6 +203,17 @@ namespace BimOnMcpShared
         }
 
         // ── MCP 연결 바 ───────────────────────────────────────────────
+        private void UpdateJobUI()
+        {
+            var job = JobMonitor.Latest;
+            if (_jobStatus == null || _cancelJob == null || job == null) return;
+            _jobStatus.Text = job.Operation + " · " + job.Status + (job.CancelRequested ? " · stop requested" : "")
+                + "\nJob: " + job.JobId + "\nDocument: " + job.DocumentId
+                + "\nVerification: " + job.Verification + " · disk save: not independently verified"
+                + (job.ErrorCode == null ? "" : "\n" + job.ErrorCode);
+            _cancelJob.IsEnabled = !job.IsTerminal && !job.CancelRequested;
+        }
+
         private Border BuildConnectionBar()
         {
             _connDot = new Border
@@ -268,7 +292,12 @@ namespace BimOnMcpShared
 
         public void LoadScripts()
         {
-            _all = _storage.GetAll();
+            try { _all = _storage.GetAll(); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Script storage unavailable", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return; // Preserve the displayed list and persisted metadata.
+            }
             Filter();
         }
 

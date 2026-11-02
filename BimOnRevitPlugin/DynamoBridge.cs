@@ -1,4 +1,5 @@
 using System;
+using BimOnMcpShared;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,10 +12,10 @@ namespace BimOnRevitPlugin
     /// <summary>
     /// 실행 중인 Dynamo(Revit 내부 로드)와 연동.
     /// 전부 리플렉션으로 접근 → Dynamo 버전(2.x/3.x)에 결합되지 않음.
-    /// Dynamo 미로드/세션 없음 시 안내 문자열 반환(예외 던지지 않음).
+    /// Dynamo 미로드/실패 시 JobException으로 실패 상태를 명시한다.
     /// BimOn 메인스레드(ExternalEvent)에서 호출됨 — Revit Transaction 미개시(읽기/세팅 안전).
     /// </summary>
-    internal static class DynamoBridge
+    internal static partial class DynamoBridge
     {
         // ── 살아있는 RevitDynamoModel 확보 ──────────────────────────
         private static object? GetModel(out string err)
@@ -46,9 +47,11 @@ namespace BimOnRevitPlugin
             (GP(ws, "Nodes") as IEnumerable)?.Cast<object>().ToList() ?? new List<object>();
 
         // ── 도구 구현 ────────────────────────────────────────────────
+        private static string Failure(string message) => throw new JobException("DYNAMO_OPERATION_FAILED", message);
+
         public static string Status()
         {
-            var m = GetModel(out var err); if (m == null) return "[Dynamo] " + err;
+            var m = GetModel(out var err); if (m == null) return Failure("[Dynamo] " + err);
             var ws = GP(m, "CurrentWorkspace");
             var ver = m.GetType().Assembly.GetName().Version;
             return $"[Dynamo] running. Version {ver}\n" +
@@ -60,23 +63,23 @@ namespace BimOnRevitPlugin
 
         public static string GetGraph()
         {
-            var m = GetModel(out var err); if (m == null) return "[Dynamo] " + err;
-            var ws = GP(m, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
+            var m = GetModel(out var err); if (m == null) return Failure("[Dynamo] " + err);
+            var ws = GP(m, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
             var nodes = Nodes(ws);
             var sb = new StringBuilder($"[Dynamo] Workspace '{GP(ws, "Name")}' — {nodes.Count} node(s):\n");
             foreach (var n in nodes)
             {
                 string flag = (((bool?)GP(n, "IsSetAsInput") ?? false) ? " [IN]" : "")
                             + (((bool?)GP(n, "IsSetAsOutput") ?? false) ? " [OUT]" : "");
-                sb.AppendLine($"  - {GP(n, "Name")}  <{n.GetType().Name}>{flag}  state={GP(n, "State")}");
+                sb.AppendLine($"  - {GP(n, "Name")}  id={GP(n, "GUID")} <{n.GetType().Name}>{flag}  state={GP(n, "State")}");
             }
             return sb.ToString().TrimEnd();
         }
 
         public static string GetNodeValues(string filter)
         {
-            var m = GetModel(out var err); if (m == null) return "[Dynamo] " + err;
-            var ws = GP(m, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
+            var m = GetModel(out var err); if (m == null) return Failure("[Dynamo] " + err);
+            var ws = GP(m, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
             var sb = new StringBuilder();
             foreach (var n in Nodes(ws))
             {
@@ -111,12 +114,11 @@ namespace BimOnRevitPlugin
 
         public static string SetInput(string nodeName, string value)
         {
-            if (string.IsNullOrWhiteSpace(nodeName)) return "[Dynamo] nodeName is empty.";
-            var m = GetModel(out var err); if (m == null) return "[Dynamo] " + err;
-            var ws = GP(m, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
-            var node = Nodes(ws).FirstOrDefault(n =>
-                string.Equals(GP(n, "Name")?.ToString(), nodeName, StringComparison.OrdinalIgnoreCase));
-            if (node == null) return $"[Dynamo] node '{nodeName}' not found.";
+            if (string.IsNullOrWhiteSpace(nodeName)) return Failure("[Dynamo] nodeName is empty.");
+            var m = GetModel(out var err); if (m == null) return Failure("[Dynamo] " + err);
+            var ws = GP(m, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
+            var node = FindNode(ws, nodeName);
+            if (node == null) return Failure($"[Dynamo] node '{nodeName}' not found.");
 
             // 입력 후보 프로퍼티를 순서대로 시도(슬라이더 Value / 코드블록 Code / 드롭다운 SelectedString·SelectedIndex …)
             foreach (var pn in new[] { "Value", "Code", "Text", "Number", "SelectedString", "SelectedIndex" })
@@ -132,41 +134,38 @@ namespace BimOnRevitPlugin
                     try { node.GetType().GetMethod("OnNodeModified", new[] { typeof(bool) })?.Invoke(node, new object[] { true }); } catch { }
                     return $"[Dynamo] set {nodeName}.{pn} = {value}  (re-read values after run/auto-run).";
                 }
-                catch (Exception e) { return $"[Dynamo] set failed on {pn}: {e.Message}"; }
+                catch (Exception e) { return Failure($"[Dynamo] set failed on {pn}: {e.Message}"); }
             }
-            return $"[Dynamo] node '{nodeName}' <{node.GetType().Name}> has no settable input property " +
-                   "(not a slider/number/string/code/dropdown input).";
+            return Failure($"[Dynamo] node '{nodeName}' <{node.GetType().Name}> has no settable input property " +
+                   "(not a slider/number/string/code/dropdown input).");
         }
 
         public static string RunCurrent()
         {
-            var m = GetModel(out var err); if (m == null) return "[Dynamo] " + err;
-            var tried = new List<string>();
+            var start = PrepareRun();
+            try { start(); }
+            catch (Exception ex) { throw new JobException("OUTCOME_UNCERTAIN", "Run invocation failed; do not replay automatically: " + ex.GetBaseException().Message); }
+            return "[Dynamo] Run issued; completion must be tracked separately.";
+        }
 
-            // 1) 표준: DynamoModel.RunCancelCommand(showErrors,cancelRun) + ExecuteCommand
-            try
+        private static Action PrepareRun()
+        {
+            var m = GetModel(out var err);
+            if (m == null) throw new JobException("DYNAMO_NOT_RUNNING", err);
+            Type? rcc = null; var t = m.GetType();
+            while (t != null && rcc == null) { rcc = t.GetNestedType("RunCancelCommand"); t = t.BaseType; }
+            var exec = m.GetType().GetMethod("ExecuteCommand");
+            if (rcc != null && exec != null)
             {
-                Type? rcc = null; var t = m.GetType();
-                while (t != null && rcc == null) { rcc = t.GetNestedType("RunCancelCommand"); t = t.BaseType; }
-                var exec = m.GetType().GetMethod("ExecuteCommand");
-                if (rcc != null && exec != null)
-                {
-                    var cmd = Activator.CreateInstance(rcc, false, false);
-                    exec.Invoke(m, new[] { cmd });
-                    return "[Dynamo] Run issued (RunCancelCommand). Re-read node values to see results.";
-                }
+                var cmd = Activator.CreateInstance(rcc, false, false);
+                return () => exec.Invoke(m, new[] { cmd });
             }
-            catch (Exception e) { tried.Add("ExecuteCommand: " + e.Message); }
-
-            // 2) DynamoModel.ForceRun()
-            try { var fr = m.GetType().GetMethod("ForceRun", Type.EmptyTypes); if (fr != null) { fr.Invoke(m, null); return "[Dynamo] ForceRun issued. Re-read node values."; } }
-            catch (Exception e) { tried.Add("ForceRun: " + e.Message); }
-
-            // 3) HomeWorkspaceModel.Run()
-            try { var ws = GP(m, "CurrentWorkspace"); var r = ws?.GetType().GetMethod("Run", Type.EmptyTypes); if (r != null) { r.Invoke(ws, null); return "[Dynamo] Workspace.Run issued. Re-read node values."; } }
-            catch (Exception e) { tried.Add("Run: " + e.Message); }
-
-            return "[Dynamo] run failed: " + string.Join(" | ", tried);
+            var force = m.GetType().GetMethod("ForceRun", Type.EmptyTypes);
+            if (force != null) return () => force.Invoke(m, null);
+            var ws = GP(m, "CurrentWorkspace");
+            var run = ws?.GetType().GetMethod("Run", Type.EmptyTypes);
+            if (run != null) return () => run.Invoke(ws, null);
+            throw new JobException("DYNAMO_RUN_UNSUPPORTED", "No supported Run command was found; no graph edits were started.");
         }
 
         // ── 그래프 편집 (phase 2): 노드 추가/연결/삭제 ──────────────────
@@ -190,9 +189,15 @@ namespace BimOnRevitPlugin
         private static void Exec(object mdl, object cmd) =>
             mdl.GetType().GetMethod("ExecuteCommand")?.Invoke(mdl, new[] { cmd });
 
-        private static object? FindNode(object ws, string name) =>
-            Nodes(ws).FirstOrDefault(n =>
-                string.Equals(GP(n, "Name")?.ToString(), name, StringComparison.OrdinalIgnoreCase));
+        private static object? FindNode(object ws, string name)
+        {
+            var nodes = Nodes(ws);
+            if (Guid.TryParse(name, out var id))
+                return nodes.FirstOrDefault(n => Guid.TryParse(GP(n, "GUID")?.ToString(), out var candidate) && id == candidate);
+            var matches = nodes.Where(n => string.Equals(GP(n, "Name")?.ToString(), name, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (matches.Count > 1) throw new JobException("AMBIGUOUS_NODE", "Multiple nodes named '" + name + "'. Use the GUID from dynamo_get_graph.");
+            return matches.SingleOrDefault();
+        }
 
         private static double Pd(string s) =>
             double.TryParse(s, System.Globalization.NumberStyles.Any,
@@ -201,55 +206,55 @@ namespace BimOnRevitPlugin
 
         public static string AddCodeBlock(string code, string xs, string ys)
         {
-            if (string.IsNullOrWhiteSpace(code)) return "[Dynamo] code is empty.";
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
-            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
+            if (string.IsNullOrWhiteSpace(code)) return Failure("[Dynamo] code is empty.");
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
+            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
             var lib = GP(GP(mdl, "EngineController"), "LibraryServices");
-            if (lib == null) return "[Dynamo] LibraryServices unavailable (EngineController not ready).";
+            if (lib == null) return Failure("[Dynamo] LibraryServices unavailable (EngineController not ready).");
             var er = GP(ws, "ElementResolver");
             double x = Pd(xs), y = Pd(ys);
             try
             {
                 var cbType = FindType("Dynamo.Graph.Nodes.CodeBlockNodeModel");
-                if (cbType == null) return "[Dynamo] CodeBlockNodeModel type not found.";
+                if (cbType == null) return Failure("[Dynamo] CodeBlockNodeModel type not found.");
                 var cb  = Activator.CreateInstance(cbType, code, x, y, lib, er);
                 var cnc = FindNested(mdl, "CreateNodeCommand");
-                if (cnc == null || cb == null) return "[Dynamo] CreateNodeCommand unavailable.";
+                if (cnc == null || cb == null) return Failure("[Dynamo] CreateNodeCommand unavailable.");
                 Exec(mdl, Activator.CreateInstance(cnc, cb, x, y, false, true)!);
                 return $"[Dynamo] code block added at ({x},{y}). name='{GP(cb, "Name")}' GUID={GP(cb, "GUID")}";
             }
-            catch (Exception e) { return $"[Dynamo] add code block failed: {e.InnerException?.Message ?? e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] add code block failed: {e.InnerException?.Message ?? e.Message}"); }
         }
 
         public static string AddNode(string typeName, string xs, string ys)
         {
-            if (string.IsNullOrWhiteSpace(typeName)) return "[Dynamo] typeName is empty.";
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
+            if (string.IsNullOrWhiteSpace(typeName)) return Failure("[Dynamo] typeName is empty.");
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
             double x = Pd(xs), y = Pd(ys);
             try
             {
                 var cnc = FindNested(mdl, "CreateNodeCommand");
-                if (cnc == null) return "[Dynamo] CreateNodeCommand unavailable.";
+                if (cnc == null) return Failure("[Dynamo] CreateNodeCommand unavailable.");
                 // 문자열 ctor: (string nodeId, string name, double x, double y, bool defaultPos, bool transform)
                 Exec(mdl, Activator.CreateInstance(cnc, Guid.NewGuid().ToString(), typeName, x, y, false, true)!);
                 return $"[Dynamo] create '{typeName}' issued at ({x},{y}). Verify with dynamo_get_graph " +
                        "(resolution depends on Dynamo's node library; use a valid node/function name).";
             }
-            catch (Exception e) { return $"[Dynamo] add node failed: {e.InnerException?.Message ?? e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] add node failed: {e.InnerException?.Message ?? e.Message}"); }
         }
 
         public static string Connect(string fromNode, string fromPortStr, string toNode, string toPortStr)
         {
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
-            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
+            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
             var a = FindNode(ws, fromNode); var b = FindNode(ws, toNode);
-            if (a == null) return $"[Dynamo] from-node '{fromNode}' not found.";
-            if (b == null) return $"[Dynamo] to-node '{toNode}' not found.";
+            if (a == null) return Failure($"[Dynamo] from-node '{fromNode}' not found.");
+            if (b == null) return Failure($"[Dynamo] to-node '{toNode}' not found.");
             int fp = Pi(fromPortStr), tp = Pi(toPortStr);
             try
             {
                 var mcc = FindNested(mdl, "MakeConnectionCommand");
-                if (mcc == null) return "[Dynamo] MakeConnectionCommand unavailable.";
+                if (mcc == null) return Failure("[Dynamo] MakeConnectionCommand unavailable.");
                 Type? ptType = null, modeType = null;
                 foreach (var c in mcc.GetConstructors())
                 {
@@ -257,7 +262,7 @@ namespace BimOnRevitPlugin
                     if (ps.Length == 4 && ps[0].ParameterType.Name == "Guid")
                     { ptType = ps[2].ParameterType; modeType = ps[3].ParameterType; break; }
                 }
-                if (ptType == null || modeType == null) return "[Dynamo] connection enums not resolved.";
+                if (ptType == null || modeType == null) return Failure("[Dynamo] connection enums not resolved.");
                 var ptOut = Enum.Parse(ptType, "Output"); var ptIn = Enum.Parse(ptType, "Input");
                 var mBegin = Enum.Parse(modeType, "Begin"); var mEnd = Enum.Parse(modeType, "End");
                 var aG = (Guid)GP(a, "GUID")!; var bG = (Guid)GP(b, "GUID")!;
@@ -265,30 +270,30 @@ namespace BimOnRevitPlugin
                 Exec(mdl, Activator.CreateInstance(mcc, bG, tp, ptIn, mEnd)!);
                 return $"[Dynamo] connected {fromNode}[out:{fp}] -> {toNode}[in:{tp}].";
             }
-            catch (Exception e) { return $"[Dynamo] connect failed: {e.InnerException?.Message ?? e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] connect failed: {e.InnerException?.Message ?? e.Message}"); }
         }
 
         public static string DeleteNode(string nodeName)
         {
-            if (string.IsNullOrWhiteSpace(nodeName)) return "[Dynamo] nodeName is empty.";
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
-            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
+            if (string.IsNullOrWhiteSpace(nodeName)) return Failure("[Dynamo] nodeName is empty.");
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
+            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
             var n = FindNode(ws, nodeName);
-            if (n == null) return $"[Dynamo] node '{nodeName}' not found.";
+            if (n == null) return Failure($"[Dynamo] node '{nodeName}' not found.");
             try
             {
                 var dmc = FindNested(mdl, "DeleteModelCommand");
-                if (dmc == null) return "[Dynamo] DeleteModelCommand unavailable.";
+                if (dmc == null) return Failure("[Dynamo] DeleteModelCommand unavailable.");
                 var gl = new List<Guid> { (Guid)GP(n, "GUID")! };
                 object? cmd = null;
                 foreach (var c in dmc.GetConstructors())
                     if (c.GetParameters().Length == 1)
                     { try { cmd = Activator.CreateInstance(dmc, gl); break; } catch { } }
-                if (cmd == null) return "[Dynamo] DeleteModelCommand ctor mismatch.";
+                if (cmd == null) return Failure("[Dynamo] DeleteModelCommand ctor mismatch.");
                 Exec(mdl, cmd);
                 return $"[Dynamo] node '{nodeName}' deleted.";
             }
-            catch (Exception e) { return $"[Dynamo] delete failed: {e.InnerException?.Message ?? e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] delete failed: {e.InnerException?.Message ?? e.Message}"); }
         }
 
         // ── Python 엔진 버전-안전 설정 (DynamoDS 소스 기준) ──
@@ -346,16 +351,16 @@ namespace BimOnRevitPlugin
 
         public static string AddPythonNode(string code, string engine, string inputsStr, string xs, string ys)
         {
-            if (string.IsNullOrWhiteSpace(code)) return "[Dynamo] code is empty.";
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
+            if (string.IsNullOrWhiteSpace(code)) return Failure("[Dynamo] code is empty.");
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
             double x = Pd(xs), y = Pd(ys);
             int inputs = Pi(inputsStr); if (inputs < 1) inputs = 1;
             try
             {
                 var pnType = FindType("PythonNodeModels.PythonNode");
-                if (pnType == null) return "[Dynamo] PythonNode type not found (Python node models not loaded).";
+                if (pnType == null) return Failure("[Dynamo] PythonNode type not found (Python node models not loaded).");
                 var node = Activator.CreateInstance(pnType);
-                if (node == null) return "[Dynamo] failed to create PythonNode.";
+                if (node == null) return Failure("[Dynamo] failed to create PythonNode.");
 
                 SetPythonEngine(node, engine ?? "");   // 버전-안전(없으면 host 기본)
 
@@ -376,7 +381,7 @@ namespace BimOnRevitPlugin
                 pnType.GetProperty("Script")?.SetValue(node, code);
 
                 var cnc = FindNested(mdl, "CreateNodeCommand");
-                if (cnc == null) return "[Dynamo] CreateNodeCommand unavailable.";
+                if (cnc == null) return Failure("[Dynamo] CreateNodeCommand unavailable.");
                 Exec(mdl, Activator.CreateInstance(cnc, node, x, y, false, true)!);
                 pnType.GetProperty("Script")?.SetValue(node, code);   // ensure persisted post-add
                 try { pnType.GetMethod("OnNodeModified", new[] { typeof(bool) })?.Invoke(node, new object[] { true }); } catch { }
@@ -386,7 +391,7 @@ namespace BimOnRevitPlugin
                 return $"[Dynamo] Python node added (engine={engNow}, inputs={nin}) at ({x},{y}). " +
                        $"name='{GP(node, "Name")}'. Wire inputs IN[0..{nin - 1}], then dynamo_run_current.";
             }
-            catch (Exception e) { return $"[Dynamo] add python node failed: {e.InnerException?.Message ?? e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] add python node failed: {e.InnerException?.Message ?? e.Message}"); }
         }
 
         // ── 배치 빌드 (성능): 노드+연결을 1회 호출로, 빌드 중 자동평가 중단 ──
@@ -467,12 +472,15 @@ namespace BimOnRevitPlugin
 
         public static string BuildGraph(string specJson)
         {
-            if (string.IsNullOrWhiteSpace(specJson)) return "[Dynamo] spec is empty.";
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
-            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return "[Dynamo] no workspace";
+            if (string.IsNullOrWhiteSpace(specJson)) return Failure("[Dynamo] spec is empty.");
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
+            var ws = GP(mdl, "CurrentWorkspace"); if (ws == null) return Failure("[Dynamo] no workspace");
             JObject spec;
             try { spec = JObject.Parse(specJson); }
-            catch (Exception e) { return $"[Dynamo] spec JSON parse error: {e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] spec JSON parse error: {e.Message}"); }
+
+            if (GP(GP(ws, "RunSettings"), "RunType")?.ToString() != "Manual")
+                throw new JobException("MANUAL_MODE_REQUIRED", "Set this graph to Manual before MCP edits. Automatic/Periodic restoration can cause unintended evaluation.");
 
             // 1) 자동평가 중단 (RunType=Manual)
             var rs = GP(ws, "RunSettings");
@@ -516,8 +524,10 @@ namespace BimOnRevitPlugin
             }
 
             // 2) 마지막에 1번만 실행
+            if (log.Count > 0) return Failure("Partial graph edit; inspect before retrying. " + string.Join("; ", log));
             string runMsg = "";
-            if ((bool?)spec["run"] ?? true) runMsg = " | " + RunCurrent();
+            // Evaluation is performed by ExecuteTracked after subscribing to completion
+            // events. Never restore an automatic mode or issue a second untracked Run.
             string logs = log.Count > 0 ? "\n  notes: " + string.Join("; ", log) : "";
             return $"[Dynamo] batch build: {nc} node(s), {cc} connection(s) in one pass " +
                    $"(auto-eval {(suspended ? "suspended during build" : "not suspended")}).{runMsg}{logs}";
@@ -526,10 +536,10 @@ namespace BimOnRevitPlugin
         // 라이브러리에서 OOTB 노드 생성이름(MangledName) 검색 — dynamo_add_node/build_graph 의 'node' 값에 그대로 사용.
         public static string SearchNodes(string query, string limitStr)
         {
-            if (string.IsNullOrWhiteSpace(query)) return "[Dynamo] query is empty.";
-            var mdl = GetModel(out var err); if (mdl == null) return "[Dynamo] " + err;
+            if (string.IsNullOrWhiteSpace(query)) return Failure("[Dynamo] query is empty.");
+            var mdl = GetModel(out var err); if (mdl == null) return Failure("[Dynamo] " + err);
             var lib = GP(GP(mdl, "EngineController"), "LibraryServices");
-            if (lib == null) return "[Dynamo] LibraryServices unavailable.";
+            if (lib == null) return Failure("[Dynamo] LibraryServices unavailable.");
             int limit = Pi(limitStr); if (limit < 1) limit = 25;
 
             var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -555,7 +565,7 @@ namespace BimOnRevitPlugin
                     }
                 }
             }
-            catch (Exception e) { return $"[Dynamo] search error: {e.Message}"; }
+            catch (Exception e) { return Failure($"[Dynamo] search error: {e.Message}"); }
 
             var hits = names.Take(limit).ToList();
             string[] uiNodes = { "String", "Number", "Boolean", "Integer Slider", "Double Slider",

@@ -1,5 +1,8 @@
 # BimOn MCP
 
+> **1.1.0 — validation complete:** tracked jobs, pinned instances/documents, duplicate-request protection and Manual-mode Dynamo evaluation.
+> See [validation results](docs/RELEASE_VALIDATION_20261101.md) and [execution semantics and limits](docs/REVIT_JOB_PREVIEW.md). [Download the validated 1.1.0 installer](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.0).
+
 **Control Autodesk Revit · Navisworks · AutoCAD — and live Dynamo graphs — from Claude AI via MCP.**
 
 BimOn MCP is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) suite that lets Claude (Desktop or Code)
@@ -49,11 +52,13 @@ Multiple instances of the same product are supported — each registers a unique
 
 ## MCP tools
 
-| Host | Dedicated | Common script tools | Dynamo (Revit only) |
-|--------|:--:|:--:|:--:|
-| Revit | 23 | 6 | **12** |
-| Navisworks | 11 | 6 | — |
-| AutoCAD | 13 | 6 | — |
+| Host | Dedicated | Common scripts | Dynamo | Job/session tools | Total |
+|--------|:--:|:--:|:--:|:--:|:--:|
+| Revit | 23 | 6 | **12** | 6 | 47 |
+| Navisworks | 11 | 6 | — | 6 | 23 |
+| AutoCAD | 13 | 6 | — | 6 | 25 |
+
+**Job/session 6**: `list_instances` · `get_environment` · `list_documents` · `submit_job` · `get_job` · `cancel_job`
 
 **Common 6**: `execute_script` · `save_script` · `execute_saved_script` · `list_scripts` · `list_scripts_search` · `delete_script`
 

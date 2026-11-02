@@ -17,7 +17,7 @@ using Newtonsoft.Json.Linq;
 namespace BimOnRevitPlugin
 {
     [Transaction(TransactionMode.Manual)]
-    public class RevitApp : IExternalApplication
+    public partial class RevitApp : IExternalApplication
     {
         private const string PIPE_NAME   = "BimOnRevitPipe";
         private const string HOST        = "Revit";
@@ -27,10 +27,13 @@ namespace BimOnRevitPlugin
 
         private static McpHandler?          _handler;
         private static ExternalEvent?       _exEvent;
-        private static readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
+        private static RevitSession _session = new RevitSession();
+        private static RevitApp? _current;
+        private static JobAudit? _audit;
         private CancellationTokenSource     _cts = new();
 
         private static ScriptStorageService _storage = new();
+        private static readonly SemaphoreSlim _storageGate = new SemaphoreSlim(1, 1);
         private static UIApplication?       _uiApp;
         private static ScriptPaletteContent? _palette;
 
@@ -39,31 +42,44 @@ namespace BimOnRevitPlugin
 
         public Result OnStartup(UIControlledApplication app)
         {
-            _handler = new McpHandler();
+            _current = this;
+            _session = new RevitSession();
+            _handler = new McpHandler(_session.InstanceId);
+            JobMonitor.Attach(_handler.Jobs);
+            _audit = new JobAudit(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "BimOnAI", "logs", "revit-jobs"), _session.InstanceId);
+            _handler.Jobs.Changed += _audit.Record;
             _exEvent = ExternalEvent.Create(_handler);
             _cts     = new CancellationTokenSource();
             _storage = new ScriptStorageService();
 
-            app.Idling += (s, _) => { if (s is UIApplication u) _uiApp = u; };
+            app.Idling += OnIdling;
 
             // 다중 인스턴스 관리: 고유 파이프명 + 활성 레지스트리 등록.
             // RegisterPalette 보다 먼저 호출 — 패널이 복원/생성되는 시점에
             // HostRegistry.Current 가 이미 준비돼 연결 바가 정상 표시되도록 한다.
             string pipeName = HostRegistry.Init("revit", PIPE_NAME,
-                () => { try { return _uiApp?.ActiveUIDocument?.Document?.Title ?? "Revit"; }
-                        catch { return "Revit"; } });
+                () => _session.Title);
 
             RegisterPalette(app);
             RegisterRibbon(app);
 
-            Task.Run(() => new PipeServer(pipeName, HandleRequest).RunAsync(_cts.Token));
+            Task.Run(() => new PipeServer(pipeName, HandleRequest, concurrency: 8).RunAsync(_cts.Token));
+            Task.Run(() => new PipeServer(pipeName + ".control", (req, ct) =>
+                HostJobService.IsControl(req) ? HandleRequest(req, ct)
+                    : Task.FromResult(HostJobService.Error("CONTROL_ONLY", "Execution is not allowed on the control pipe.")), 2).RunAsync(_cts.Token));
             return Result.Succeeded;
         }
 
         public Result OnShutdown(UIControlledApplication app)
         {
+            app.Idling -= OnIdling;
+            _handler?.Jobs.Stop();
+            _audit?.Dispose();
             HostRegistry.Current?.Shutdown();
             _cts.Cancel();
+            _exEvent?.Dispose();
+            _current = null;
             return Result.Succeeded;
         }
 
@@ -185,7 +201,7 @@ namespace BimOnRevitPlugin
         }
 
         // ── 요청 라우팅 ───────────────────────────────────────────────
-        private async Task<string> HandleRequest(JObject req, CancellationToken ct)
+        private async Task<string> Dispatch(JObject req, CancellationToken ct)
         {
             var tool = req["params"]?["name"]?.ToString();
             var args = req["params"]?["arguments"] as JObject;
@@ -260,9 +276,15 @@ namespace BimOnRevitPlugin
         {
             string code = args?["code"]?.ToString() ?? "";
             if (string.IsNullOrWhiteSpace(code)) return Task.FromResult("[Error] code is empty.");
+            // Saved scripts may change on disk between retries: include the resolved code in the key fingerprint.
+            if (_request.Value is RequestOptions options)
+                options.Fingerprint = Digest(options.Fingerprint + "\n" + code);
             bool needPreamble    = !code.Contains("clr.AddReference");
             // If user code already manages its own Transaction, don't auto-wrap
-            bool userHasTx       = code.Contains("Transaction(") || code.Contains(".Start()");
+            string? transactionMode = _request.Value?.Arguments["transactionMode"]?.ToString();
+            if (transactionMode != null && transactionMode != "automatic" && transactionMode != "manual")
+                throw new JobException("INVALID_ARGUMENT", "transactionMode must be automatic or manual.");
+            bool userHasTx = transactionMode == "manual" || (transactionMode == null && (code.Contains("Transaction(") || code.Contains(".Start()")));
 
             return Run(doc =>
             {
@@ -285,15 +307,22 @@ namespace BimOnRevitPlugin
                     tx.Start();
                     var r = ScriptExecutor.Execute(code, vars,
                         preamble: needPreamble ? RevitPreamble : null);
-                    if (r.Success) tx.Commit();
-                    else           tx.RollBack();
+                    if (r.Success)
+                    {
+                        var status = tx.Commit();
+                        if (status != TransactionStatus.Committed)
+                            throw new JobException("TRANSACTION_NOT_COMMITTED", "Transaction returned " + status + "; inspect Revit before retrying.");
+                    }
+                    else tx.RollBack();
+                    if (!r.Success) throw new JobException("SCRIPT_FAILED", ScriptExecutor.FormatResult(r));
                     return ScriptExecutor.FormatResult(r);
                 }
 
                 // User manages Transaction (or document is read-only)
-                return ScriptExecutor.FormatResult(
-                    ScriptExecutor.Execute(code, vars,
-                        preamble: needPreamble ? RevitPreamble : null));
+                var manualResult = ScriptExecutor.Execute(code, vars,
+                    preamble: needPreamble ? RevitPreamble : null);
+                if (!manualResult.Success) throw new JobException("SCRIPT_FAILED", ScriptExecutor.FormatResult(manualResult));
+                return ScriptExecutor.FormatResult(manualResult);
             }, ct);
         }
 
@@ -338,7 +367,18 @@ namespace BimOnRevitPlugin
             if (execAfter)
             {
                 sb.AppendLine("\n── Execute Result ──");
-                sb.AppendLine(await HandleExecuteScript(args, ct));
+                string execution = await HandleExecuteScript(args, ct);
+                if (execution.StartsWith("{"))
+                {
+                    try
+                    {
+                        var job = JObject.Parse(execution);
+                        if ((int?)job["bimonJobProtocol"] == 1)
+                        { job["savedScript"] = name; return job.ToString(Formatting.None); }
+                    }
+                    catch (JsonException) { }
+                }
+                sb.AppendLine(execution);
             }
             return sb.ToString().TrimEnd();
         }
@@ -385,29 +425,10 @@ namespace BimOnRevitPlugin
             }
 
             var execArgs = new JObject { ["code"] = code };
-            return Task.FromResult($"▶ '{scriptName}'\n").ContinueWith(
-                _ => HandleExecuteScript(execArgs, ct).Result);
+            return HandleExecuteScript(execArgs, ct);
         }
 
         // ── Revit 메인 스레드 실행 ────────────────────────────────────
-        private async Task<string> Run(Func<Document?, string> task, CancellationToken ct)
-        {
-            await _lock.WaitAsync(ct);
-            try
-            {
-                var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-                using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
-                _handler!.SetTask(task, tcs);
-                _exEvent!.Raise();
-                using var timeout = new CancellationTokenSource(25_000);
-                var done = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, timeout.Token));
-                if (done != tcs.Task) return "[Error] Revit timeout";
-                return await tcs.Task;
-            }
-            catch (OperationCanceledException) { return "[Error] Cancelled"; }
-            catch (Exception ex) { return $"[Error] {ex.Message}"; }
-            finally { _lock.Release(); }
-        }
 
         // ── 기존 Revit 도구 구현 ─────────────────────────────────────
 
@@ -558,12 +579,16 @@ namespace BimOnRevitPlugin
         {
             if (doc == null) return "No document open";
             string pname = args?["parameterName"]?.ToString() ?? ""; string val = args?["value"]?.ToString() ?? "";
-            var ids = new UIDocument(doc).Selection.GetElementIds(); if (!ids.Any()) return "No elements selected.";
+            var ids = new UIDocument(doc).Selection.GetElementIds(); if (!ids.Any()) throw new JobException("NO_SELECTION", "No elements selected.");
             var el = doc.GetElement(ids.First());
             using var tx = new Transaction(doc, "BimOn Param"); tx.Start();
-            var p = el.LookupParameter(pname); if (p==null||p.IsReadOnly) { tx.RollBack(); return "Parameter not found or read-only"; }
-            bool ok = p.StorageType switch { StorageType.String => p.Set(val)||true, StorageType.Double => double.TryParse(val,System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out double d)&&p.Set(d)||false, StorageType.Integer => int.TryParse(val,out int i)&&p.Set(i)||false, _ => false };
-            if (!ok) { tx.RollBack(); return "Value conversion failed"; } tx.Commit();
+            var p = el.LookupParameter(pname); if (p==null||p.IsReadOnly) { tx.RollBack(); throw new JobException("PARAMETER_UNWRITABLE", "Parameter not found or read-only."); }
+            bool ok = p.StorageType switch { StorageType.String => p.Set(val) || p.AsString() == val,
+                StorageType.Double => double.TryParse(val,System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out double d) && (p.Set(d) || p.AsDouble() == d),
+                StorageType.Integer => int.TryParse(val,out int i) && (p.Set(i) || p.AsInteger() == i), _ => false };
+            if (!ok) { tx.RollBack(); throw new JobException("PARAMETER_SET_FAILED", "Value conversion or parameter update failed."); }
+            var committed = tx.Commit();
+            if (committed != TransactionStatus.Committed) throw new JobException("TRANSACTION_NOT_COMMITTED", "Transaction returned " + committed + ". Inspect Revit before retrying.");
             return $"'{pname}' = '{val}' updated";
         }
 
@@ -671,19 +696,17 @@ namespace BimOnRevitPlugin
         // ── 팔레트 참조 ──────────────────────────────────────────────
         internal static void SetPalette(ScriptPaletteContent p) => _palette = p;
         internal static (ScriptStorageService storage, string host, Action<ScriptMeta> exec) GetPaletteArgs() =>
-            (_storage, HOST, meta =>
+            (_storage, HOST, async meta =>
             {
-                if (_uiApp == null) return;
-                string raw  = File.ReadAllText(meta.ScriptPath);
-                string code = ScriptStorageService.ExtractUserCode(raw);
-                var doc     = _uiApp.ActiveUIDocument?.Document;
-                if (doc == null) { MessageBox.Show("No document is currently open."); return; }
-                var vars = new Dictionary<string, object?> { ["doc"]=doc, ["uidoc"]=new UIDocument(doc), ["app"]=doc.Application, ["__revit__"]=_uiApp };
-                bool needPreamble = !code.Contains("clr.AddReference");
-                var result = ScriptExecutor.Execute(code, vars, preamble: needPreamble ? RevitPreamble : null);
-                MessageBox.Show(ScriptExecutor.FormatResult(result), $"[{meta.Name}] 결과",
-                    MessageBoxButton.OK,
-                    result.Success ? MessageBoxImage.Information : MessageBoxImage.Error);
+                try
+                {
+                    if (_current == null) return;
+                    var code = ScriptStorageService.ExtractUserCode(File.ReadAllText(meta.ScriptPath));
+                    var result = await _current.HandleRequest(new JObject { ["params"] = new JObject
+                        { ["name"] = "execute_script", ["arguments"] = new JObject { ["code"] = code } } }, _current._cts.Token);
+                    MessageBox.Show(result, $"[{meta.Name}] Result", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex) { MessageBox.Show(ex.Message, "BimOn script error"); }
             });
     }
 

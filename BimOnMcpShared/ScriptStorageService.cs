@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Security.Cryptography;
 using Newtonsoft.Json;
 
 namespace BimOnMcpShared
@@ -20,14 +22,19 @@ namespace BimOnMcpShared
         private readonly string _scriptRootPath;
         private readonly string _archiveRootPath;
         private readonly string _archiveMetaPath;
+        private readonly string _mutexName;
 
-        public ScriptStorageService()
+        public ScriptStorageService() : this(null) { }
+
+        public ScriptStorageService(string? storageDirectory)
         {
-            string appData    = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            _scriptRootPath   = Path.Combine(appData, "BimOnAI", "Scripts");
-            _metaDbPath       = Path.Combine(appData, "BimOnAI", "scripts_meta.json");
-            _archiveRootPath  = Path.Combine(appData, "BimOnAI", "Scripts_Archive");
-            _archiveMetaPath  = Path.Combine(appData, "BimOnAI", "scripts_meta_archive.json");
+            string root = Path.GetFullPath(storageDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BimOnAI"));
+            _scriptRootPath   = Path.Combine(root, "Scripts");
+            _metaDbPath       = Path.Combine(root, "scripts_meta.json");
+            _archiveRootPath  = Path.Combine(root, "Scripts_Archive");
+            _archiveMetaPath  = Path.Combine(root, "scripts_meta_archive.json");
+            using var sha = SHA256.Create();
+            _mutexName = "Local\\BimOnScripts-" + BitConverter.ToString(sha.ComputeHash(Utf8NoBom.GetBytes(root.ToUpperInvariant()))).Replace("-", "");
             Directory.CreateDirectory(_scriptRootPath);
         }
 
@@ -69,14 +76,22 @@ namespace BimOnMcpShared
             string[] tags,
             string panel = "General")
         {
+            using var lease = AcquireStore();
+            var metas = LoadMeta(); // Validate before touching code files.
             string safeName  = Sanitize(name);
+            if (string.IsNullOrEmpty(safeName)) throw new ArgumentException("Script name must contain a letter or digit.");
+            if (host != Sanitize(host) || string.IsNullOrEmpty(host)) throw new ArgumentException("Invalid script host.");
+            if (metas.Any(m => m.Host.Equals(host, StringComparison.OrdinalIgnoreCase)
+                && m.SafeName.Equals(safeName, StringComparison.OrdinalIgnoreCase)
+                && !m.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                throw new IOException("Another script has the same normalized folder name. Choose a different name.");
             string hostDir   = Path.Combine(_scriptRootPath, host);
             string btnPath   = Path.Combine(hostDir, safeName);
             Directory.CreateDirectory(btnPath);
 
             // host별 호환 헤더 생성
             string finalCode = BuildCode(host, userCode);
-            File.WriteAllText(Path.Combine(btnPath, "script.py"), finalCode, Utf8NoBom);
+            AtomicWrite(Path.Combine(btnPath, "script.py"), finalCode);
 
             string yaml =
                 $"title: {name}\n" +
@@ -85,9 +100,8 @@ namespace BimOnMcpShared
                 $"author: AI (BimOn)\n" +
                 $"tags: [{string.Join(", ", tags)}]\n" +
                 $"created: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n";
-            File.WriteAllText(Path.Combine(btnPath, "meta.yaml"), yaml, Utf8NoBom);
+            AtomicWrite(Path.Combine(btnPath, "meta.yaml"), yaml);
 
-            var metas = LoadMeta();
             metas.RemoveAll(m =>
                 m.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
                 m.Host.Equals(host, StringComparison.OrdinalIgnoreCase));
@@ -116,6 +130,7 @@ namespace BimOnMcpShared
         /// </summary>
         public bool Delete(string name, string host)
         {
+            using var lease = AcquireStore();
             var metas = LoadMeta();
             int idx = metas.FindIndex(m =>
                 m.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
@@ -135,6 +150,8 @@ namespace BimOnMcpShared
         /// </summary>
         public bool Archive(string name, string host)
         {
+            using var lease = AcquireStore();
+            var archive = LoadArchiveMeta();
             var metas = LoadMeta();
             int idx = metas.FindIndex(m =>
                 m.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
@@ -150,6 +167,7 @@ namespace BimOnMcpShared
                 {
                     string bucket  = DateTime.Now.ToString("yyyyMM");
                     string destDir = Path.Combine(_archiveRootPath, bucket, host, meta.SafeName);
+                    if (!IsUnderRoot(destDir, _archiveRootPath)) throw new IOException("Invalid archive destination.");
                     Directory.CreateDirectory(Path.GetDirectoryName(destDir)!);
                     if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
                     Directory.Move(srcDir, destDir);
@@ -158,7 +176,6 @@ namespace BimOnMcpShared
             }
             catch { return false; }
 
-            var archive = LoadArchiveMeta();
             archive.RemoveAll(m =>
                 m.Name.Equals(name, StringComparison.OrdinalIgnoreCase) &&
                 m.Host.Equals(host, StringComparison.OrdinalIgnoreCase));
@@ -176,6 +193,7 @@ namespace BimOnMcpShared
         /// </summary>
         public (int brokenLinks, int orphanFolders) CleanOrphans()
         {
+            using var lease = AcquireStore();
             var metas = LoadMeta();
 
             // 1) 파일이 존재하지 않는 메타 항목 제거
@@ -250,7 +268,7 @@ namespace BimOnMcpShared
         private static bool IsUnderRoot(string path, string root)
         {
             string full = Path.GetFullPath(path);
-            string rootFull = Path.GetFullPath(root);
+            string rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             return full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -262,14 +280,13 @@ namespace BimOnMcpShared
                 return JsonConvert.DeserializeObject<List<ScriptMeta>>(
                     File.ReadAllText(_archiveMetaPath)) ?? new List<ScriptMeta>();
             }
-            catch { return new List<ScriptMeta>(); }
+            catch (Exception ex) { throw new IOException("Script archive metadata could not be read; no automatic reset was performed.", ex); }
         }
 
         private void SaveArchiveMeta(List<ScriptMeta> metas)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_archiveMetaPath)!);
-            File.WriteAllText(_archiveMetaPath,
-                JsonConvert.SerializeObject(metas, Formatting.Indented), Utf8NoBom);
+            AtomicWrite(_archiveMetaPath, JsonConvert.SerializeObject(metas, Formatting.Indented));
         }
 
         // ── 코드 원본 추출 (헤더 제거) ────────────────────────────
@@ -327,14 +344,42 @@ namespace BimOnMcpShared
                 return JsonConvert.DeserializeObject<List<ScriptMeta>>(
                     File.ReadAllText(_metaDbPath)) ?? new List<ScriptMeta>();
             }
-            catch { return new List<ScriptMeta>(); }
+            catch (Exception ex) { throw new IOException("Script metadata could not be read; preserve the file and repair it before writing.", ex); }
         }
 
         public void SaveMeta(List<ScriptMeta> metas)
         {
+            using var lease = AcquireStore();
             Directory.CreateDirectory(Path.GetDirectoryName(_metaDbPath)!);
-            File.WriteAllText(_metaDbPath,
-                JsonConvert.SerializeObject(metas, Formatting.Indented), Utf8NoBom);
+            AtomicWrite(_metaDbPath, JsonConvert.SerializeObject(metas, Formatting.Indented));
+        }
+
+        private IDisposable AcquireStore() => new StoreLease(_mutexName);
+        private sealed class StoreLease : IDisposable
+        {
+            private readonly Mutex _mutex;
+            internal StoreLease(string name)
+            {
+                _mutex = new Mutex(false, name);
+                try
+                {
+                    if (!_mutex.WaitOne(1000)) throw new IOException("Script storage is busy in another host. Retry the storage operation later.");
+                }
+                catch (AbandonedMutexException) { /* Acquired; validate persisted metadata before writes. */ }
+                catch { _mutex.Dispose(); throw; }
+            }
+            public void Dispose() { _mutex.ReleaseMutex(); _mutex.Dispose(); }
+        }
+        private static void AtomicWrite(string path, string value)
+        {
+            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temporary, value, Utf8NoBom);
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else File.Move(temporary, path);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
 
         private static string Sanitize(string name) =>

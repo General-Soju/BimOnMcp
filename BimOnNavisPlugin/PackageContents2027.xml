@@ -6,8 +6,9 @@
   <CompanyDetails Name="JungGeun Park (소주장군)"
                   Url="https://www.youtube.com/@GeneralSoju"
                   Email="sojunbeer119@gmail.com"/>
-  <!-- Navisworks 2027(Nw24)은 전통적인 Plugins\ 폴더 스캔을 지원하지 않고
-       ApplicationPlugins 번들 방식만 지원한다(실사용자 라이브 검증으로 확인). -->
+  <!-- Distribution uses an ApplicationPlugins bundle. Native Plugins folders can
+       also be discovered (observed on 2027); diagnose duplicate DLLs through
+       get_environment.pluginPath before assuming the bundle is the loaded copy. -->
   <RuntimeRequirements OS="Win64" Platform="NAVMAN|NAVSIM" SeriesMin="Nw24" SeriesMax="Nw24"/>
   <Components Description="BimOn MCP Navisworks Plugin">
     <RuntimeRequirements OS="Win64" Platform="NAVMAN|NAVSIM" SeriesMin="Nw24" SeriesMax="Nw24"/>

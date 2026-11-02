@@ -22,7 +22,7 @@ using AcApp = Autodesk.AutoCAD.ApplicationServices.Application;
 
 namespace BimOnAcadPlugin
 {
-    public class AcadApp : IExtensionApplication
+    public partial class AcadApp : IExtensionApplication
     {
         private const string PIPE_NAME = "BimOnAcadPipe";
         private const string HOST      = "AutoCAD";
@@ -39,11 +39,7 @@ namespace BimOnAcadPlugin
 
             // ① Pipe 서버 최우선 시작 (팔레트 오류와 무관하게 MCP 연결 보장)
             //    다중 인스턴스 관리: 고유 파이프명 + 활성 레지스트리 등록
-            string pipeName = HostRegistry.Init("autocad", PIPE_NAME,
-                () => { try { return System.IO.Path.GetFileName(
-                                  AcApp.DocumentManager.MdiActiveDocument?.Name ?? "AutoCAD"); }
-                        catch { return "AutoCAD"; } });
-            Task.Run(() => new PipeServer(pipeName, HandleRequest).RunAsync(_cts.Token));
+            StartJobs();
 
             // ② 팔레트 등록은 AutoCAD 완전 초기화 후 Idle 이벤트에서 수행
             AcApp.Idle += OnFirstIdle;
@@ -51,6 +47,8 @@ namespace BimOnAcadPlugin
 
         public void Terminate()
         {
+            AcApp.Idle -= OnJobIdle;
+            _jobs?.Dispose();
             HostRegistry.Current?.Shutdown();
             _cts.Cancel();
         }
@@ -95,14 +93,14 @@ namespace BimOnAcadPlugin
         }
 
         // ── 요청 라우팅 ───────────────────────────────────────────────
-        private static async Task<string> HandleRequest(JObject req, CancellationToken ct)
+        private static async Task<string> Dispatch(JObject req, CancellationToken ct)
         {
             var tool = req["params"]?["name"]?.ToString();
             var args = req["params"]?["arguments"] as JObject;
             var doc  = AcApp.DocumentManager.MdiActiveDocument;
 
-            // Lock document for the entire request — ensures thread safety
-            // for all read/write operations called from the PipeServer background thread.
+            // This method is entered by AutoCAD Idle on the host thread. Locking is
+            // required independently; a document lock is not thread marshaling.
             using var docLock = doc?.LockDocument();
 
             return tool switch
@@ -311,20 +309,20 @@ namespace BimOnAcadPlugin
 
         private static string SetEntityProperty(Document? doc, JObject? args)
         {
-            if (doc == null) return "No drawing open";
+            if (doc == null) return "[Error] No drawing open";
             string handleStr = args?["handle"]?.ToString() ?? "";
             string property  = args?["property"]?.ToString() ?? "";
             string value     = args?["value"]?.ToString() ?? "";
 
             if (!long.TryParse(handleStr, System.Globalization.NumberStyles.HexNumber, null, out long handleVal))
-                return "Please provide a valid Handle.";
+                return "[Error] Please provide a valid Handle.";
             var db = doc.Database;
             var handle = new Handle(handleVal);
-            if (!db.TryGetObjectId(handle, out ObjectId objId)) return $"Handle '{handleStr}' 없음";
+            if (!db.TryGetObjectId(handle, out ObjectId objId)) return $"[Error] Handle '{handleStr}' not found";
 
             using var tr = db.TransactionManager.StartTransaction();
             var ent = tr.GetObject(objId, OpenMode.ForWrite) as Entity;
-            if (ent == null) { tr.Commit(); return "Entity not found."; }
+            if (ent == null) return "[Error] Entity not found.";
 
             bool ok = property.ToLower() switch
             {
@@ -333,8 +331,9 @@ namespace BimOnAcadPlugin
                 "linetype" => SetAndReturn(() => ent.Linetype = value),
                 _          => false
             };
+            if (!ok) return $"[Error] Unsupported property or invalid value: '{property}'";
             tr.Commit();
-            return ok ? $"[{handleStr}] {property} = {value} updated" : $"속성 '{property}' 변경 실패";
+            return $"[{handleStr}] {property} = {value} updated";
         }
 
         private static bool SetAndReturn(Action action) { action(); return true; }
@@ -457,15 +456,13 @@ namespace BimOnAcadPlugin
 
         internal static void SetPalette(ScriptPaletteContent p) => _palette = p;
         internal static (ScriptStorageService storage, string host, Action<ScriptMeta> exec) GetPaletteArgs() =>
-            (_storage, HOST, meta =>
+            (_storage, HOST, async meta =>
             {
-                var doc = AcApp.DocumentManager.MdiActiveDocument;
-                if (doc == null) { MessageBox.Show("No drawing is currently open."); return; }
                 string raw  = File.ReadAllText(meta.ScriptPath);
                 string code = ScriptStorageService.ExtractUserCode(raw);
-                var vars    = new Dictionary<string, object?> { ["doc"]=doc, ["db"]=doc.Database, ["ed"]=doc.Editor };
-                var result  = ScriptExecutor.Execute(code, vars);
-                MessageBox.Show(ScriptExecutor.FormatResult(result), $"[{meta.Name}] 결과");
+                var result = await _jobs!.Handle(new JObject { ["params"] = new JObject {
+                    ["name"] = "execute_script", ["arguments"] = new JObject { ["code"] = code } } }, _cts.Token);
+                MessageBox.Show(result, $"[{meta.Name}] 결과");
             });
     }
 }

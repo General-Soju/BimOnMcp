@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <StartupObject>BridgeTests</StartupObject>
+    <DefineConstants>$(DefineConstants);PUBLIC</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\BimOnMcpBridge\Program.cs" Link="BridgeProgram.cs" />
+    <Compile Include="..\..\BimOnMcpBridge\RevitJobs.cs" Link="RevitJobs.cs" />
+    <Compile Include="..\..\BimOnRevitPlugin\RevitSession.cs" Link="RevitSession.cs" />
+    <Compile Include="..\..\BimOnRevitPlugin\JobRouting.cs" Link="JobRouting.cs" />
+    <Compile Include="..\..\BimOnRevitPlugin\McpHandler.cs" Link="McpHandler.cs" />
+    <Compile Include="..\..\BimOnRevitPlugin\DynamoBridge.cs" Link="DynamoBridge.cs" />
+    <Compile Include="..\..\BimOnRevitPlugin\DynamoLifecycle.cs" Link="DynamoLifecycle.cs" />
+    <Compile Include="..\..\BimOnMcpShared\JobAudit.cs" Link="JobAudit.cs" />
+    <Compile Include="..\..\BimOnMcpShared\JobQueue.cs" Link="JobQueue.cs" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>

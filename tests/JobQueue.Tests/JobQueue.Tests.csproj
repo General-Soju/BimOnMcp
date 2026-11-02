@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net48</TargetFrameworks>
+    <LangVersion>10</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\BimOnMcpShared\JobQueue.cs" Link="JobQueue.cs" />
+    <Compile Include="..\..\BimOnMcpShared\JobAudit.cs" Link="JobAudit.cs" />
+    <Compile Include="..\..\BimOnMcpShared\PipeServer.cs" Link="PipeServer.cs" />
+    <Compile Include="..\..\BimOnMcpShared\HostJobService.cs" Link="HostJobService.cs" />
+    <Compile Include="..\..\BimOnMcpShared\JobMonitor.cs" Link="JobMonitor.cs" />
+    <Compile Include="..\..\BimOnMcpShared\ScriptStorageService.cs" Link="ScriptStorageService.cs" />
+    <Compile Include="..\..\BimOnMcpShared\ScriptMeta.cs" Link="ScriptMeta.cs" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+</Project>
