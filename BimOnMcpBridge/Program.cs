@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,6 +35,13 @@ namespace BimOnMcpBridge
         private static readonly SemaphoreSlim ControlCalls = new SemaphoreSlim(4, 4);
         private const int PIPE_TIMEOUT_MS    = 28_000;   // Must be < REVIT_TIMEOUT_MS
         private const int REVIT_TIMEOUT_MS   = 30_000;
+
+        // Use the product version emitted from the project Version property.
+        private static readonly string ServerVersion =
+            typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+                .InformationalVersion.Split('+')[0]
+            ?? typeof(Program).Assembly.GetName().Version?.ToString(3)
+            ?? "unknown";
 
         private static string _target = "revit";
         private static string PipeName => _target.ToLower() switch
@@ -130,13 +138,19 @@ namespace BimOnMcpBridge
                                 jsonrpc = "2.0", id,
                                 result  = new {
                                     protocolVersion = "2024-11-05",
-                                    serverInfo      = new { name = $"BimOn-{_target}", version = "3.0.0" },
+                                    serverInfo      = new { name = $"BimOn-{_target}", version = ServerVersion },
                                     capabilities    = new { tools = new { } }
                                 }
                             });
                             break;
 
                         case "notifications/initialized":
+                            break;
+
+                        case "ping":
+                            // Notifications have no reply; preserve the request ID verbatim.
+                            if (id != null && id.Type != JTokenType.Null)
+                                Send(new { jsonrpc = "2.0", id, result = new { } });
                             break;
 
                         case "tools/list":

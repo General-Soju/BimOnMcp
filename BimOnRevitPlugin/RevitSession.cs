@@ -14,7 +14,8 @@ namespace BimOnRevitPlugin
     internal sealed class RevitSession
     {
         private readonly object _gate = new object();
-        private readonly Dictionary<Document, string> _documents = new Dictionary<Document, string>();
+        // Closed Revit wrappers can throw from Equals/GetHashCode. Never use them as dictionary keys.
+        private readonly List<(Document Document, string Id)> _documents = new List<(Document, string)>();
         private JObject _snapshot = new JObject();
         public string InstanceId { get; }
         public RevitSession()
@@ -25,13 +26,15 @@ namespace BimOnRevitPlugin
         public void Refresh(UIApplication app)
         {
             var open = app.Application.Documents.Cast<Document>().Where(d => d.IsValidObject && !d.IsLinked).ToList();
-            foreach (var old in _documents.Keys.Where(d => !open.Contains(d)).ToList()) _documents.Remove(old);
+            _documents.RemoveAll(entry => !entry.Document.IsValidObject || !open.Any(d => d.Equals(entry.Document)));
             var active = app.ActiveUIDocument?.Document;
             var rows = new JArray();
             string? activeId = null;
             foreach (var doc in open)
             {
-                if (!_documents.TryGetValue(doc, out var id)) _documents.Add(doc, id = Guid.NewGuid().ToString("N"));
+                var tracked = _documents.FirstOrDefault(entry => entry.Document.IsValidObject && doc.Equals(entry.Document));
+                var id = tracked.Id;
+                if (id == null) _documents.Add((doc, id = Guid.NewGuid().ToString("N")));
                 bool selected = doc.Equals(active);
                 if (selected) activeId = id;
                 rows.Add(new JObject { ["documentId"] = id, ["title"] = doc.Title,

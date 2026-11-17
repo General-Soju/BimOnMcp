@@ -9,6 +9,8 @@
   <ItemGroup>
     <Compile Include="..\..\BimOnMcpBridge\Program.cs" Link="BridgeProgram.cs" />
     <Compile Include="..\..\BimOnMcpBridge\RevitJobs.cs" Link="RevitJobs.cs" />
+    <Compile Include="..\..\BimOnMcpBridge\RevitQuery.cs" Link="RevitQuery.cs" />
+    <EmbeddedResource Include="..\..\BimOnMcpBridge\RevitQuery.py" LogicalName="BimOnMcpBridge.RevitQuery.py" />
     <Compile Include="..\..\BimOnRevitPlugin\RevitSession.cs" Link="RevitSession.cs" />
     <Compile Include="..\..\BimOnRevitPlugin\JobRouting.cs" Link="JobRouting.cs" />
     <Compile Include="..\..\BimOnRevitPlugin\McpHandler.cs" Link="McpHandler.cs" />

@@ -1,7 +1,7 @@
 # BimOn MCP
 
-> **1.1.0 — validation complete:** tracked jobs, pinned instances/documents, duplicate-request protection and Manual-mode Dynamo evaluation.
-> See [validation results](docs/RELEASE_VALIDATION_20261101.md) and [execution semantics and limits](docs/REVIT_JOB_PREVIEW.md). [Download the validated 1.1.0 installer](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.0).
+> **1.1.3 (2026-11-17):** AutoCAD/Navisworks read-only annotations corrected; mutation and script tools remain non-read-only. MCP ping, actual build version, closed-document session handling and configuration preservation fixes. Includes two fixed read-only Revit query tools.
+> See [current validation](docs/READONLY_ANNOTATIONS_20261117.md), [1.1.2 validation](docs/RELEASE_VALIDATION_20261117.md), [historical 1.1.0 results](docs/RELEASE_VALIDATION_20261101.md) and [execution semantics](docs/REVIT_JOB_PREVIEW.md). Download the [1.1.3 installer and SHA-256 checksum](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.3). See also [live AutoCAD/Navisworks 2025–2027 tests](docs/LIVE_HOST_READONLY_20261117.md).
 
 **Control Autodesk Revit · Navisworks · AutoCAD — and live Dynamo graphs — from Claude AI via MCP.**
 
@@ -54,11 +54,13 @@ Multiple instances of the same product are supported — each registers a unique
 
 | Host | Dedicated | Common scripts | Dynamo | Job/session tools | Total |
 |--------|:--:|:--:|:--:|:--:|:--:|
-| Revit | 23 | 6 | **12** | 6 | 47 |
+| Revit | 25 | 6 | **12** | 6 | 49 |
 | Navisworks | 11 | 6 | — | 6 | 23 |
 | AutoCAD | 13 | 6 | — | 6 | 25 |
 
 **Job/session 6**: `list_instances` · `get_environment` · `list_documents` · `submit_job` · `get_job` · `cancel_job`
+
+**Conditional Revit queries**: `get_query_options` and `query_elements` combine category, associated level and explicit building criteria. They require a pinned instance/document and do not modify the model.
 
 **Common 6**: `execute_script` · `save_script` · `execute_saved_script` · `list_scripts` · `list_scripts_search` · `delete_script`
 
@@ -89,7 +91,7 @@ restart Claude Desktop / Code.
 If Claude doesn't show the `BimOn-*` tools after installing and restarting, register them by hand.
 
 **Config file(s)** — edit the one for the client you use (create it if missing; keep existing content):
-- Claude Desktop: `%AppData%\Claude\claude_desktop_config.json`
+- Claude Desktop: `%AppData%\Claude\claude_desktop_config.json`; newer packaged installations use an existing profile under `%LocalAppData%\Claude-Data\claude_*\claude_desktop_config.json`. The installer merges both locations when present.
 - Claude Code: `%UserProfile%\.claude.json`
 
 Add (or merge) these `mcpServers` entries — use **double backslashes** and replace `<you>` with your Windows username:

@@ -1,11 +1,11 @@
-; ============================================================
+﻿; ============================================================
 ;  BimOnMcp (Public) — Inno Setup Script
 ;  Revit 2025-2027 / Navisworks 2025-2027 / AutoCAD 2025-2027 + Dynamo
 ;  Control Autodesk BIM hosts from Claude via MCP. MIT License.
 ; ============================================================
 
 #define MyAppName      "BimOn MCP"
-#define MyAppVersion   "1.1.0"
+#define MyAppVersion   "1.1.3"
 #define MyAppPublisher "JungGeun Park (General Soju)"
 #define MyAppURL       "https://www.youtube.com/@GeneralSoju"
 #define MyAppSupport   "https://github.com/General-Soju/BimOnMcp"
@@ -118,6 +118,13 @@ Name: "{userappdata}\BimOnAI\Scripts\AutoCAD"
 Source: "{#SrcNavis27}\*"; DestDir: "{code:Navis2027NativeDir}"; Components: navis; Check: HasNavis2027Native; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Code]
+var McpConfigFailed: Boolean;
+
+function GetCustomSetupExitCode(): Integer;
+begin
+  Result := 0;
+  if McpConfigFailed then Result := 10;
+end;
 #include "NavisNativePath.iss"
 function IsRevit2025(): Boolean;
 begin
@@ -181,7 +188,7 @@ begin
   Msg := Msg + '  - AutoCAD  (2025 / 2026 / 2027)' + #13#10;
   Msg := Msg + '  - Claude Desktop' + #13#10 + #13#10;
   Msg := Msg + 'Run as a NORMAL user (not administrator). Click OK to continue.';
-  MsgBox(Msg, mbInformation, MB_OK);
+  if not WizardSilent then MsgBox(Msg, mbInformation, MB_OK);
   Exec('taskkill.exe', '/im BimOnMcpBridge.exe /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
@@ -191,7 +198,11 @@ begin
   BridgePath := ExpandConstant('{userappdata}\BimOnAI\BimOnMcpBridge.exe');
   Ps1Path    := ExpandConstant('{userappdata}\BimOnAI\MergeClaudeConfig.ps1');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Ps1Path + '" -BridgePath "' + BridgePath + '"';
-  Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  ResultCode := -1;
+  McpConfigFailed := not Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if ResultCode <> 0 then McpConfigFailed := True;
+  if McpConfigFailed then
+    Log('MCP configuration failed. Existing invalid configuration was preserved; setup exit code 10.');
 end;
 
 { Navisworks 플러그인 DLL이 실제로 ProgramData에 안착했는지 검증.
@@ -226,7 +237,12 @@ begin
 
     Msg := 'Installation complete!' + #13#10 + #13#10;
     Msg := Msg + 'Restart Claude Desktop / Claude Code to activate BimOn MCP.' + #13#10 + #13#10;
-    Msg := Msg + 'Registered MCP servers: BimOn-Revit, BimOn-Navisworks, BimOn-AutoCAD' + #13#10;
+    if McpConfigFailed then begin
+      Msg := 'Files installed, but MCP registration needs attention.' + #13#10 + #13#10;
+      Msg := Msg + 'Automatic configuration failed. Existing invalid settings were preserved.' + #13#10;
+      Msg := Msg + 'Check your Claude JSON configuration, then run MergeClaudeConfig.ps1 again.' + #13#10;
+    end else
+      Msg := Msg + 'Registered MCP servers: BimOn-Revit, BimOn-Navisworks, BimOn-AutoCAD' + #13#10;
     Msg := Msg + '(Dynamo tools are part of the Revit plugin.)' + #13#10 + #13#10;
     if NavisFailed <> '' then begin
       Msg := Msg + '⚠ Navisworks plugin file copy FAILED for:' + NavisFailed + #13#10;
@@ -238,6 +254,6 @@ begin
     Msg := Msg + 'GitHub : https://github.com/General-Soju/BimOnMcp' + #13#10;
     Msg := Msg + 'YouTube: https://www.youtube.com/@GeneralSoju' + #13#10;
     Msg := Msg + 'Email  : sojunbeer119@gmail.com';
-    MsgBox(Msg, mbInformation, MB_OK);
+    if not WizardSilent then MsgBox(Msg, mbInformation, MB_OK);
   end;
 end;

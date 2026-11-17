@@ -18,6 +18,37 @@ internal static class BridgeTests
     { try { run(); } catch (Exception ex) { Check(ex.Message.StartsWith(prefix), ex.Message); return; } throw new Exception("Expected " + prefix); }
     static void Main()
     {
+        Case("conditional query accepts data only and pins script execution", () => {
+            var value = "601동\"\nraise Exception('injection')";
+            var args = new JObject { ["targetInstanceId"] = "1-100", ["documentId"] = "doc", ["criteria"] = new JObject {
+                ["buildingMode"] = "parameter", ["buildingParameter"] = "동", ["buildingValue"] = value, ["categoryId"] = -2000011, ["levelId"] = 1 } };
+            var translated = RevitQuery.Translate("query_elements", args);
+            Check(translated["name"]!.ToString() == "execute_script", "fixed execution adapter");
+            var script = translated["arguments"]!["code"]!.ToString();
+            Check(!script.Contains(value) && !script.Contains("Transaction(") && !script.Contains(".Set("), "data became executable or script writes");
+            Check(translated["arguments"]!["transactionMode"]!.ToString() == "manual" && translated["arguments"]!["documentId"]!.ToString() == "doc", "target/transaction not pinned");
+            var encoded = script.Split("b64decode('")[1].Split("')")[0];
+            var decoded = JObject.Parse(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
+            Check(decoded["criteria"]!["buildingValue"]!.ToString() == value, "data roundtrip changed");
+            args["code"] = "danger"; Reject(() => RevitQuery.Translate("query_elements", args), "INVALID_QUERY"); args.Remove("code");
+            args["criteria"]!["extra"] = true; Reject(() => RevitQuery.Translate("query_elements", args), "INVALID_QUERY"); ((JObject)args["criteria"]!).Remove("extra");
+        });
+        Case("conditional query rejects unpinned invalid and oversized selections", () => {
+            var args = new JObject { ["criteria"] = new JObject { ["buildingMode"] = "project" } };
+            Reject(() => RevitQuery.Translate("query_elements", args), "INVALID_QUERY");
+            args["targetInstanceId"] = "1-100";args["documentId"] = "doc";args["elementIds"] = new JArray(1,1);
+            Reject(() => RevitQuery.Translate("query_elements", args), "INVALID_QUERY");args["elementIds"] = new JArray(Enumerable.Range(1,21));
+            Reject(() => RevitQuery.Translate("query_elements", args), "INVALID_QUERY");args["elementIds"] = new JArray(1);
+            Reject(() => RevitQuery.Translate("get_query_options", args), "INVALID_QUERY");
+            args.Remove("elementIds");args["criteria"]!["levelId"] = -1;Reject(() => RevitQuery.Translate("query_elements",args),"INVALID_QUERY");
+        });
+        Case("query tools are readonly and Revit-only", () => {
+            var revit=ToolDefinitions.Get("revit").Select(JObject.FromObject).ToArray();
+            foreach(var name in new[]{"get_query_options","query_elements"}) {
+                Check((bool)revit.Single(t=>t["name"]!.ToString()==name)["annotations"]!["readOnlyHint"]!,"missing readonly hint");
+                Check(!ToolDefinitions.Get("autocad").Select(JObject.FromObject).Any(t=>t["name"]!.ToString()==name),"query leaked to other host");
+            }
+        });
         var instances = new JArray(new JObject { ["instanceId"] = "1-100", ["active"] = true }, new JObject { ["instanceId"] = "2-200", ["active"] = false });
         string job = "2-200:" + Guid.NewGuid().ToString("N");
         Case("default and explicit instance routes", () =>
@@ -70,6 +101,33 @@ internal static class BridgeTests
             }
             Check(tools.All(t => t["annotations"]?["readOnlyHint"]?.Type == JTokenType.Boolean), "unclassified tool");
         });
+        Case("all desktop catalogs explicitly classify reads and mutations", () =>
+        {
+            foreach (var host in new[] { "autocad", "navisworks" })
+            {
+                var tools = ToolDefinitions.Get(host).Select(JObject.FromObject).ToArray();
+                var mutations = new[] { "execute_script", "execute_saved_script", "save_script", "delete_script", "submit_job", "cancel_job",
+                    host == "autocad" ? "set_entity_property" : "approve_clash" };
+                Check(tools.Length == (host == "autocad" ? 25 : 23), "catalog changed: " + host);
+                foreach (var tool in tools)
+                {
+                    string name = tool["name"]!.ToString();
+                    Check((bool?)tool["annotations"]?["readOnlyHint"] == !mutations.Contains(name), "incorrect hint: " + host + "/" + name);
+                    Check(tool["annotations"]?["idempotentHint"] == null, "unbounded replay guarantee");
+                    Check(tool["inputSchema"]?["properties"]?["contentRevision"] != null, "revision guard lost");
+                }
+                foreach (var name in mutations) Check(tools.Any(t => t["name"]!.ToString() == name), "mutation coverage missing");
+            }
+        });
+        Case("unknown and cross-host tools fail closed regardless of get prefix", () =>
+        {
+            foreach (var host in new[] { "Revit", "AutoCAD", "Navisworks" })
+            {
+                var names = new[] { "get_future_side_effect", "execute_script", "submit_job", host == "AutoCAD" ? "get_clash_tests" : "get_layer_list" };
+                var tools = ToolDefinitions.WithReadOnlyHints(names.Select(n => (object)new JObject { ["name"] = n }), host).Select(JObject.FromObject);
+                Check(tools.All(t => (bool?)t["annotations"]?["readOnlyHint"] == false), "unreviewed tool marked readonly");
+            }
+        });
         Case("instance registry validates live processes and tolerates malformed records", () =>
         {
             string dir = Path.Combine(Path.GetTempPath(), "BimOnBridgeTests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
@@ -101,6 +159,16 @@ internal static class BridgeTests
             ui.Application.Documents.Remove(a); s.Refresh(ui); ui.Application.Documents.Add(a); ui.ActiveUIDocument.Document = a; s.Refresh(ui);
             Check(s.CaptureTarget(null) != id, "reopened doc reused identity");
             var copy = s.Snapshot(); copy["activeDocumentId"] = "bad"; Check(s.CaptureTarget(null) != "bad", "mutable snapshot");
+        });
+        Case("closing a background copy never hashes or compares invalid native documents", () =>
+        {
+            var session = new RevitSession(); var ui = new UIApplication();
+            var active = new Document(); var copy = new Document();
+            ui.Application.Documents.Add(active); ui.Application.Documents.Add(copy); ui.ActiveUIDocument = new UIDocument { Document = active };
+            session.Refresh(ui); var id = session.CaptureTarget(null);
+            ui.Application.Documents.Remove(copy); copy.IsValidObject = false;
+            session.Refresh(ui); Check(session.CaptureTarget(null) == id, "active identity changed after copy closure");
+            Check(session.ValidateTarget(ui,id) == active, "remaining document became inaccessible");
         });
         Case("real request routing: submit, deduplicate, poll, execute and retrieve", () =>
         {

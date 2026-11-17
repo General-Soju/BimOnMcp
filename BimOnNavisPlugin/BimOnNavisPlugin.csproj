@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Version>1.1.0</Version>
+    <Version>1.1.3</Version>
     <OutputType>Library</OutputType>
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>BimOnNavisPlugin</AssemblyName>
@@ -25,7 +25,7 @@
   <!-- Navisworks API는 메이저 버전 간 비호환 (2025=v22, 2026=v23) → 버전별 빌드 필수.
        기본 2025. 다른 버전: dotnet build -p:NavisVersion=2026 -->
   <PropertyGroup>
-    <Version>1.1.0</Version>
+    <Version>1.1.3</Version>
     <NavisVersion Condition="'$(NavisVersion)'==''">2025</NavisVersion>
     <DefineConstants Condition="'$(NavisVersion)'=='2026' OR '$(NavisVersion)'=='2027'">$(DefineConstants);NAVIS_2026_PLUS</DefineConstants>
     <NavisApiDir Condition="Exists('C:\Program Files\Autodesk\Navisworks Manage $(NavisVersion)\Autodesk.Navisworks.Api.dll')">C:\Program Files\Autodesk\Navisworks Manage $(NavisVersion)</NavisApiDir>

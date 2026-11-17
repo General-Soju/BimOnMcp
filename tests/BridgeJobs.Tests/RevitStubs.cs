@@ -4,6 +4,12 @@ namespace Autodesk.Revit.DB
 {
     public sealed class Document
     {
+        public override int GetHashCode() => IsValidObject ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this) : throw new System.InvalidOperationException("Closed document native hash");
+        public override bool Equals(object? other)
+        {
+            if (!IsValidObject || other is Document d && !d.IsValidObject) throw new System.InvalidOperationException("Closed document native equality");
+            return object.ReferenceEquals(this, other);
+        }
         public bool IsValidObject { get; set; } = true;
         public bool IsLinked { get; set; }
         public bool IsReadOnly { get; set; }

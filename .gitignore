@@ -68,3 +68,8 @@ BimOnFormaExtension/
 # GitHub 업로드 헬퍼 스크립트
 push_to_github.ps1
 GitHub_Upload.bat
+
+# Python test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

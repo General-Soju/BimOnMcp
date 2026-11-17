@@ -72,6 +72,11 @@ namespace BimOnMcpBridge
             var parameters = request["params"] as JObject ?? new JObject();
             string tool = parameters["name"]?.ToString() ?? "";
             var args = parameters["arguments"] as JObject ?? new JObject();
+            if (_target == "revit" && RevitQuery.IsTool(tool)) {
+                parameters = RevitQuery.Translate(tool, args);
+                tool = parameters["name"]!.ToString();
+                args = (JObject)parameters["arguments"]!;
+            }
             bool explicitPin = args["targetInstanceId"] != null || args["documentId"] != null || args["idempotencyKey"] != null;
             parameters["arguments"] = args;
             request["params"] = parameters;
@@ -164,27 +169,49 @@ namespace BimOnMcpBridge
             result.Add(ToolP("cancel_job", "Cancels queued work. For running work, only sets CancelRequested; it cannot stop Python/API execution or roll back completed changes.",
                 new[] { ("jobId", "string", "Exact JobId") }, new[] { "jobId" }));
             if (host != "Revit")
-                return result.Select(value =>
+                result = result.Select(value =>
                 {
                     var definition = JObject.FromObject(value);
                     definition["description"] = definition["description"]?.ToString().Replace("Revit/Dynamo", host).Replace("Revit", host);
                     var properties = definition["inputSchema"]?["properties"] as JObject;
                     if (properties != null) properties["contentRevision"] = new JObject { ["type"] = "string", ["description"] = "Optional document content revision from list_documents; stale model requests fail closed." };
                     return (object)definition;
-                }).ToArray();
-            // Explicit reviewed allowlist: scripts and job submission remain potentially mutating.
+                }).ToList();
+            else
+            {
+                result.Add(RevitQuery.Definition("get_query_options"));
+                result.Add(RevitQuery.Definition("query_elements"));
+            }
+            return WithReadOnlyHints(result, host);
+        }
+
+        internal static object[] WithReadOnlyHints(IEnumerable<object> tools, string host)
+        {
             // These are client hints, not authorization or a cross-session replay guarantee.
+            // Explicit per-host allowlists, never a name-prefix heuristic. Unknown tools
+            // and arbitrary execution/job submission remain potentially mutating.
             var readOnly = new HashSet<string>(StringComparer.Ordinal) {
+                "list_scripts", "list_scripts_search", "list_instances", "list_documents", "get_environment", "get_job"
+            };
+            if (host == "Revit") readOnly.UnionWith(new[] {
                 "get_document_title", "get_document_info", "get_element_count", "get_levels",
                 "get_project_info", "get_warnings", "get_linked_documents", "get_selected_elements",
                 "get_worksets", "get_units", "get_element_by_id", "get_elements_by_category",
                 "get_elements_by_filter", "get_element_parameters", "get_views", "get_sheets",
                 "get_schedules", "get_rooms", "get_families", "get_family_types",
                 "get_element_geometry", "get_shared_parameters", "dynamo_status", "dynamo_get_graph",
-                "dynamo_get_node_values", "dynamo_search_nodes", "list_scripts", "list_scripts_search",
-                "list_instances", "list_documents", "get_environment", "get_job"
-            };
-            return result.Select(value => {
+                "dynamo_get_node_values", "dynamo_search_nodes", "get_query_options", "query_elements"
+            });
+            else if (host == "AutoCAD") readOnly.UnionWith(new[] {
+                "get_drawing_info", "get_layer_list", "get_entity_count", "get_block_list", "get_lisp_routines",
+                "get_selected_entities", "get_text_styles", "get_dim_styles", "get_layouts",
+                "get_entities_by_layer", "get_entity_by_handle", "get_block_attributes"
+            });
+            else if (host == "Navisworks") readOnly.UnionWith(new[] {
+                "get_document_title", "get_document_info", "get_model_count", "get_clash_tests", "get_clash_results",
+                "get_selection_sets", "get_viewpoints", "get_timeliner_tasks", "get_model_items", "get_item_properties"
+            });
+            return tools.Select(value => {
                 var definition = JObject.FromObject(value);
                 definition["annotations"] = new JObject {
                     ["readOnlyHint"] = readOnly.Contains(definition["name"]?.ToString() ?? "")
