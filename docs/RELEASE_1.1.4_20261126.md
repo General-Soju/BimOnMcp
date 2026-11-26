@@ -2,6 +2,8 @@
 
 Released 2026-11-26. The public edition includes Revit, AutoCAD, Navisworks and Dynamo.
 
+> **Connection scope:** BimOn 1.1.4 supports Claude Desktop, Claude Code CLI and local Codex CLI/Desktop. It does **not** provide ordinary ChatGPT web/app-plugin integration. A local Codex host in ChatGPT desktop is distinct from that remote connection. No ChatGPT account plugin, remote MCP relay or authentication service is included. See [AI client support](../README.md#ai-client-support-114).
+
 ## Fixed
 
 - The installer offers registration for Claude Desktop, Claude Code CLI and Codex CLI/Desktop. New settings are created for selected clients; Codex CLI is not required to register the desktop app.

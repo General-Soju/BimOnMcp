@@ -2,12 +2,28 @@
 
 # BimOn MCP
 
+## AI client support (1.1.4)
+
+> **The current BimOn installer does not connect ordinary ChatGPT web/app chats through apps or plugins.** It registers local STDIO MCP servers for the clients below; it does not install a ChatGPT account plugin or a remote MCP gateway/authentication service.
+
+| Client / execution context | BimOn installer support |
+|---|---|
+| Claude Desktop | Supported: local MCP registration |
+| Claude Code CLI | Supported: local MCP registration |
+| Codex CLI | Supported: local MCP registration |
+| Codex desktop / a local Codex host in ChatGPT desktop | Supported: local Codex configuration; use a task running on this Windows PC |
+| ChatGPT web / ordinary ChatGPT app-plugin connection | Not provided by this release |
+
+“Codex Desktop” in the installer means the **local Codex host**, not every ChatGPT chat. ChatGPT itself supports MCP through other connection routes; this is a limitation of the current BimOn distribution. Registering `%USERPROFILE%\.codex\config.toml` does not register a ChatGPT account plugin. Remote use requires a separately implemented MCP endpoint/relay, authentication and account/workspace setup. Reinstalling BimOn will not add that connection.
+
+References (checked 2026-11-26): [OpenAI MCP client configuration](https://learn.chatgpt.com/docs/extend/mcp), [ChatGPT custom MCP connections](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt).
+
 > **1.1.3 (2026-11-17):** AutoCAD/Navisworks read-only annotations corrected; mutation and script tools remain non-read-only. MCP ping, actual build version, closed-document session handling and configuration preservation fixes. Includes two fixed read-only Revit query tools.
 > See [current validation](docs/READONLY_ANNOTATIONS_20261117.md), [1.1.2 validation](docs/RELEASE_VALIDATION_20261117.md), [historical 1.1.0 results](docs/RELEASE_VALIDATION_20261101.md) and [execution semantics](docs/REVIT_JOB_PREVIEW.md). Download the [1.1.3 installer and SHA-256 checksum](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.3). See also [live AutoCAD/Navisworks 2025–2027 tests](docs/LIVE_HOST_READONLY_20261117.md).
 
-**Control Autodesk Revit · Navisworks · AutoCAD — and live Dynamo graphs — from Claude AI via MCP.**
+**Control Autodesk Revit · Navisworks · AutoCAD — and live Dynamo graphs — from Claude or local Codex via MCP.**
 
-BimOn MCP is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) suite that lets Claude (Desktop or Code)
+BimOn MCP is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) suite that lets Claude (Desktop or Code) or local Codex
 drive your desktop Autodesk BIM hosts: query models, run IronPython scripts, save reusable scripts to an in-host
 palette, and read/build/run **Dynamo** graphs — all in natural language.
 
@@ -31,12 +47,12 @@ palette, and read/build/run **Dynamo** graphs — all in natural language.
 
 - Revit / AutoCAD: single **.NET 8** build loads across 2025–2027 (IronPython 3.4.2).
 - Navisworks API is major-version-incompatible → **per-version builds** (`-p:NavisVersion=2026`).
-- Claude clients: **Claude Desktop + Claude Code** both auto-registered.
+- Registration choices: **Claude Desktop, Claude Code CLI, Codex CLI/local Desktop** (selected by default).
 
 ## Architecture
 
 ```
-Claude Desktop / Claude Code
+Claude Desktop / Claude Code CLI / local Codex
         │  MCP (JSON-RPC 2.0 over stdio)
         ▼
 BimOnMcpBridge.exe ──[--target revit]──────► BimOnRevitPipe.<PID>
@@ -75,7 +91,7 @@ A `dynamo-mcp` Claude skill is included (`skills/dynamo-mcp`).
 
 Download the installer from the **[latest release](https://github.com/General-Soju/BimOnMcp/releases/latest)** and run it
 **as a normal user** (not administrator). See **[INSTALL_GUIDE.md](INSTALL_GUIDE.md)** for details. After install,
-restart Claude Desktop / Code.
+restart the selected Claude / Codex app.
 
 > The installer is not code-signed → Windows SmartScreen may warn "Windows protected your PC"; click **More info → Run anyway**.
 > Verify integrity with the SHA-256 on the release page.
@@ -86,11 +102,13 @@ restart Claude Desktop / Code.
 | Revit plugin | `%AppData%\Autodesk\Revit\Addins\{2025·2026·2027}` |
 | Navisworks plugin | `%ProgramData%\Autodesk\Navisworks Manage {ver}\Plugins\` |
 | AutoCAD bundle | `%AppData%\Autodesk\ApplicationPlugins\BimOnAcadPlugin.bundle\` |
-| Claude config | Desktop `claude_desktop_config.json` + Code `~\.claude.json` (merged, existing settings preserved) |
+| AI client config | Claude Desktop JSON + Claude Code `~\.claude.json` + Codex `~\.codex\config.toml` (selected clients, existing settings preserved) |
 
 ## Manual MCP registration (if it didn't auto-register)
 
-If Claude doesn't show the `BimOn-*` tools after installing and restarting, register them by hand.
+First run **Start > BimOn AI > Repair MCP registration**, then restart your Claude / local Codex app. See [installation and diagnostics](INSTALL_GUIDE.md). This does not register ordinary ChatGPT chats.
+
+The JSON example below is **for Claude only**. Codex uses TOML at `%USERPROFILE%\.codex\config.toml` (or `<CODEX_HOME>/config.toml`); do not paste Claude JSON there.
 
 **Config file(s)** — edit the one for the client you use (create it if missing; keep existing content):
 - Claude Desktop: `%AppData%\Claude\claude_desktop_config.json`; newer packaged installations use an existing profile under `%LocalAppData%\Claude-Data\claude_*\claude_desktop_config.json`. The installer merges both locations when present.
@@ -108,13 +126,13 @@ Add (or merge) these `mcpServers` entries — use **double backslashes** and rep
 ```
 Then **fully quit and restart** Claude Desktop / Claude Code.
 
-Or just re-run the bundled merge script (preserves your other settings, writes both clients):
+Or just re-run the bundled merge script (preserves your other settings, registers Claude Desktop/Code and local Codex):
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:AppData\BimOnAI\MergeClaudeConfig.ps1" -BridgePath "$env:AppData\BimOnAI\BimOnMcpBridge.exe"
 ```
 
 **Common causes of "not registered":**
-- Installed **while Claude was open** → just restart Claude.
+- Installed **while the AI client was open** → restart that Claude / Codex app.
 - Installer run **as administrator** → the config/bridge went to the *admin* account's `%AppData%`; reinstall as a **normal user**, or point the `command` path at the correct `%AppData%`.
 - **Claude Desktop rewrites its config on exit** → edit the file only while Claude is **fully closed**, then reopen.
 - Confirm the bridge exists: `%AppData%\BimOnAI\BimOnMcpBridge.exe`.
