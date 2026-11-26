@@ -104,6 +104,12 @@ namespace BimOnMcpBridge
 
         static async Task Main(string[] args)
         {
+            if (Array.IndexOf(args, "--register-clients") >= 0)
+            {
+                var targets = new List<string> { "revit", "navisworks", "autocad" };
+                Environment.ExitCode = ClientRegistration.Run(args, targets.ToArray());
+                return;
+            }
             var outstanding = new List<Task>();
             // --target 파싱
             for (int i = 0; i < args.Length - 1; i++)

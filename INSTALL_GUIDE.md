@@ -7,15 +7,21 @@
 
 ## Install (recommended — installer)
 1. **Close** Revit, Navisworks, AutoCAD **and** Claude Desktop / Claude Code.
-2. Run **`BimOnMcp_Setup_v1.1.3.exe`** as a **normal user** (NOT “Run as administrator”). Download it from [GitHub release 1.1.3](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.3), together with its SHA-256 checksum.
+2. Run **`BimOnMcp_Setup_v1.1.4.exe`** as a **normal user** (NOT “Run as administrator”). Download it from [GitHub release 1.1.4](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.4), together with its SHA-256 checksum.
    - Running elevated installs into the wrong account’s `%AppData%` and the MCP won’t be found.
 3. Accept the MIT license, pick components (Revit / Navisworks / AutoCAD), install.
-4. The installer merges MCP servers into your Claude config(s), preserving existing settings.
-5. **Restart Claude Desktop / Claude Code.**
+4. Select the AI clients to register. The installer merges their MCP configurations, preserving existing settings.
+5. **Restart Claude Desktop / Claude Code / Codex.**
 
 If existing Claude JSON is malformed, installation preserves it and reports that registration needs attention (exit code 10 for automation). Correct the JSON and rerun the installed `MergeClaudeConfig.ps1` with `-BridgePath` set to the full bridge EXE path. Do not replace an existing configuration wholesale.
 
-Codex registrations are separate: this installer does not modify Codex settings. For example, register each target with `codex mcp add BimOn-Revit -- "C:\Users\<you>\AppData\Roaming\BimOnAI\BimOnMcpBridge.exe" --target revit` and use analogous names/targets for AutoCAD and Navisworks. Use `codex mcp get BimOn-Revit` to inspect the registration; actual tool calls must be tested separately.
+The installer offers three registration checkboxes: **Claude Desktop**, **Claude Code CLI**, and **Codex CLI / Desktop**. They are selected by default. New settings are created even before first use; existing servers, preferences and approval settings are preserved. Codex CLI does not need to be installed to register the desktop app. CLI and desktop share the Codex entry, so it is registered once.
+
+Registration report: `%APPDATA%\BimOnAI\McpRegistration.json`. Failed clients do not block other clients. Exit code 10 means some registration needs attention; the report gives each path and result without dumping credentials. Changed existing configs receive a uniquely named `.bimon-*.bak` backup beside them. Keep those backups private. TOML formatting may be normalized; semantic settings and comments are preserved by the parser.
+
+If an AI app is installed/initialized later, or creates a new Desktop profile, run **Start > BimOn AI > Repair MCP registration**, then restart that AI app. This repair registers all supported targets with all three clients. Custom `CODEX_HOME` and `CLAUDE_CONFIG_DIR` environment variables are honored when running setup/repair. Claude Code uses `<CLAUDE_CONFIG_DIR>/.claude.json` when set; Codex uses `<CODEX_HOME>/config.toml`.
+
+For a read-only diagnostic, run the installed bridge with `--register-clients --diagnose`. For selective registration use `--register-clients --clients code,codex` (choices: `desktop`, `code`, `codex`, `none`). Registration confirms configuration, not live model connectivity. An existing disabled server or restrictive policy stays disabled/restrictive; registration does not bypass security settings.
 
 ## Verify
 - In Claude, the tools `BimOn-Revit`, `BimOn-Navisworks`, `BimOn-AutoCAD` should be available.

@@ -1,3 +1,5 @@
+> **1.1.4 (2026-11-26):** New-PC registration for Claude Desktop, Claude Code CLI and Codex CLI/Desktop. Includes independent client error handling, backups, diagnostics and a Start-menu repair action. [Download](https://github.com/General-Soju/BimOnMcp/releases/tag/v1.1.4). [Validation and limitations](docs/RELEASE_1.1.4_20261126.md).
+
 # BimOn MCP
 
 > **1.1.3 (2026-11-17):** AutoCAD/Navisworks read-only annotations corrected; mutation and script tools remain non-read-only. MCP ping, actual build version, closed-document session handling and configuration preservation fixes. Includes two fixed read-only Revit query tools.

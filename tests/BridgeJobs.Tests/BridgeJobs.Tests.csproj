@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\BimOnMcpBridge\Program.cs" Link="BridgeProgram.cs" />
+    <Compile Include="..\..\BimOnMcpBridge\ClientRegistration.cs" Link="ClientRegistration.cs" />
     <Compile Include="..\..\BimOnMcpBridge\RevitJobs.cs" Link="RevitJobs.cs" />
     <Compile Include="..\..\BimOnMcpBridge\RevitQuery.cs" Link="RevitQuery.cs" />
     <EmbeddedResource Include="..\..\BimOnMcpBridge\RevitQuery.py" LogicalName="BimOnMcpBridge.RevitQuery.py" />
@@ -19,5 +20,6 @@
     <Compile Include="..\..\BimOnMcpShared\JobAudit.cs" Link="JobAudit.cs" />
     <Compile Include="..\..\BimOnMcpShared\JobQueue.cs" Link="JobQueue.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Tomlyn" Version="0.19.0" />
   </ItemGroup>
 </Project>

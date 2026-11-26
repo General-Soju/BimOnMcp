@@ -5,7 +5,7 @@
 ; ============================================================
 
 #define MyAppName      "BimOn MCP"
-#define MyAppVersion   "1.1.3"
+#define MyAppVersion   "1.1.4"
 #define MyAppPublisher "JungGeun Park (General Soju)"
 #define MyAppURL       "https://www.youtube.com/@GeneralSoju"
 #define MyAppSupport   "https://github.com/General-Soju/BimOnMcp"
@@ -61,10 +61,18 @@ Name: "en";     MessagesFile: "compiler:Default.isl"
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Components]
-Name: "bridge";  Description: "BimOn MCP Bridge  (required for Claude Desktop / Code)"; Types: full compact custom; Flags: fixed
+Name: "bridge";  Description: "BimOn MCP Bridge  (Claude Desktop / Code and Codex)"; Types: full compact custom; Flags: fixed
 Name: "revit";   Description: "Revit 2025 / 2026 / 2027 Plugin (+ Dynamo)";           Types: full compact custom
 Name: "navis";   Description: "Navisworks 2025 / 2026 / 2027 Plugin";                 Types: full custom
 Name: "autocad"; Description: "AutoCAD 2025 / 2026 / 2027 Plugin (+ Civil 3D etc.)";  Types: full custom
+
+[Tasks]
+Name: "registerdesktop"; Description: "Register Claude Desktop"; GroupDescription: "AI client registration (existing settings are preserved):"
+Name: "registercode"; Description: "Register Claude Code CLI (including first use)"; GroupDescription: "AI client registration (existing settings are preserved):"
+Name: "registercodex"; Description: "Register Codex CLI / Desktop (CLI installation not required)"; GroupDescription: "AI client registration (existing settings are preserved):"
+
+[Icons]
+Name: "{userprograms}\BimOn AI\Repair MCP registration"; Filename: "{userappdata}\BimOnAI\RepairMcpRegistration.cmd"; WorkingDir: "{userappdata}\BimOnAI"
 
 [Types]
 Name: "full";    Description: "Full install  (Bridge + Revit + Navisworks + AutoCAD)"
@@ -77,6 +85,8 @@ Name: "custom";  Description: "Custom install"; Flags: iscustom
 [Files]
 Source: "{#SrcBridge}\BimOnMcpBridge.exe"; DestDir: "{userappdata}\BimOnAI"; Components: bridge; Flags: ignoreversion
 Source: "MergeClaudeConfig.ps1";           DestDir: "{userappdata}\BimOnAI"; Components: bridge; Flags: ignoreversion
+Source: "RepairMcpRegistration.cmd"; DestDir: "{userappdata}\BimOnAI"; Components: bridge; Flags: ignoreversion
+Source: "ThirdPartyNotices.txt"; DestDir: "{userappdata}\BimOnAI"; Components: bridge; Flags: ignoreversion
 Source: "BimOn.ico";                        DestDir: "{userappdata}\BimOnAI"; Components: bridge; Flags: ignoreversion
 Source: "{#SrcRevit}\Lib\*"; DestDir: "{userappdata}\BimOnAI\Lib"; Components: bridge; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -193,16 +203,21 @@ begin
 end;
 
 procedure ConfigureClaude();
-var BridgePath, Ps1Path, Params: String; ResultCode: Integer;
+var BridgePath, Params, Clients: String; ResultCode: Integer;
 begin
   BridgePath := ExpandConstant('{userappdata}\BimOnAI\BimOnMcpBridge.exe');
-  Ps1Path    := ExpandConstant('{userappdata}\BimOnAI\MergeClaudeConfig.ps1');
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Ps1Path + '" -BridgePath "' + BridgePath + '"';
+  Clients := '';
+  if WizardIsTaskSelected('registerdesktop') then Clients := Clients + 'desktop,';
+  if WizardIsTaskSelected('registercode') then Clients := Clients + 'code,';
+  if WizardIsTaskSelected('registercodex') then Clients := Clients + 'codex,';
+  if Clients = '' then Clients := 'none' else Delete(Clients, Length(Clients), 1);
+  Params := '--register-clients --clients "' + Clients + '" --report "' +
+    ExpandConstant('{userappdata}\BimOnAI\McpRegistration.json') + '"';
   ResultCode := -1;
-  McpConfigFailed := not Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  McpConfigFailed := not Exec(BridgePath, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   if ResultCode <> 0 then McpConfigFailed := True;
   if McpConfigFailed then
-    Log('MCP configuration failed. Existing invalid configuration was preserved; setup exit code 10.');
+    Log('Some MCP clients could not be registered. See McpRegistration.json; setup exit code 10.');
 end;
 
 { Navisworks 플러그인 DLL이 실제로 ProgramData에 안착했는지 검증.
@@ -236,13 +251,13 @@ begin
     end;
 
     Msg := 'Installation complete!' + #13#10 + #13#10;
-    Msg := Msg + 'Restart Claude Desktop / Claude Code to activate BimOn MCP.' + #13#10 + #13#10;
+    Msg := Msg + 'Restart Claude Desktop / Claude Code / Codex to activate BimOn MCP.' + #13#10 + #13#10;
     if McpConfigFailed then begin
       Msg := 'Files installed, but MCP registration needs attention.' + #13#10 + #13#10;
-      Msg := Msg + 'Automatic configuration failed. Existing invalid settings were preserved.' + #13#10;
-      Msg := Msg + 'Check your Claude JSON configuration, then run MergeClaudeConfig.ps1 again.' + #13#10;
+      Msg := Msg + 'Some client registrations failed. Other clients were processed independently.' + #13#10;
+      Msg := Msg + 'See %APPDATA%\BimOnAI\McpRegistration.json, then use Start > BimOn AI > Repair MCP registration.' + #13#10;
     end else
-      Msg := Msg + 'Registered MCP servers: BimOn-Revit, BimOn-Navisworks, BimOn-AutoCAD' + #13#10;
+      Msg := Msg + 'Selected clients processed; see McpRegistration.json. Available servers: BimOn-Revit, BimOn-Navisworks, BimOn-AutoCAD' + #13#10;
     Msg := Msg + '(Dynamo tools are part of the Revit plugin.)' + #13#10 + #13#10;
     if NavisFailed <> '' then begin
       Msg := Msg + '⚠ Navisworks plugin file copy FAILED for:' + NavisFailed + #13#10;
